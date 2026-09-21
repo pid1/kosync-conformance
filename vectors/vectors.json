@@ -1,0 +1,34 @@
+{
+  "_comment": "Golden vectors for KOReader's partial MD5. See SPEC.md §8. Every digest here was computed on 2026-09-21 by two independent implementations that agree: a verbatim LuaJIT transcription of koreader frontend/util.lua partialMD5 (vectors/samples.lua) and the Node implementation in vectors/check.mjs.",
+  "algorithm": {
+    "sampleSize": 1024,
+    "offsets": [0, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864, 268435456, 1073741824],
+    "note": "Twelve offsets. The first is 0, not 256: the loop runs i = -1..10 and LuaJIT's bit.lshift masks the shift count to five bits, so lshift(1024, -2) becomes 1024 << 30, which overflows 32 bits to 0. Stop at the first offset at or past EOF; truncate the final sample rather than padding; concatenate in offset order; MD5 once; lowercase hex."
+  },
+  "patternGenerator": "P(n)[i] = (i * 31 + (i >> 8)) mod 256",
+  "synthetic": [
+    { "size": 500,     "samples": 1,  "digest": "21f0df72cce9bc7da8dae2512ee5feed" },
+    { "size": 1024,    "samples": 1,  "digest": "f4cd1641040a17288bb6104d9e66bdb5" },
+    { "size": 1025,    "samples": 2,  "digest": "170a888db01c00d8fc3e5d8d84de5838" },
+    { "size": 2048,    "samples": 2,  "digest": "d0e59a0c7b893c3b8d6a9bddbd64e631" },
+    { "size": 3000,    "samples": 2,  "digest": "d0e59a0c7b893c3b8d6a9bddbd64e631" },
+    { "size": 200000,  "samples": 5,  "digest": "1784b150454ef4cf6780ceb94af0386f" },
+    { "size": 1050000, "samples": 7,  "digest": "0fca5c751677ecbc2dcfe80ea75ace32" }
+  ],
+  "sparse": {
+    "_comment": "Zero everywhere except a 16-byte zero-padded decimal marker of the offset at each of the twelve offsets.",
+    "size": 1073742848,
+    "samples": 12,
+    "digest": "266ff27c24919f4cec96f90f9b3231ca"
+  },
+  "koreaderTestData": [
+    { "file": "leaves.epub", "size": 881331, "samples": 6, "digest": "59d481d168cca6267322f150c5f6a2a3" },
+    { "file": "tall.pdf",    "size": 388039, "samples": 6, "digest": "41cce710f34e5ec21315e19c99821415" }
+  ],
+  "arithmeticVariant": {
+    "_comment": "NOT what KOReader computes. The first offset read as 1024>>2 = 256 instead of 0. Listed only so these digests are identifiable if they turn up in a database.",
+    "leaves.epub": "566aa9554a1428eb7234ffd9f2d41f7b",
+    "tall.pdf": "0a829912b6ff9584d5b0f461f54a31ca",
+    "P(200000)": "a4c467911c7cce46aa803a42866f5ac1"
+  }
+}

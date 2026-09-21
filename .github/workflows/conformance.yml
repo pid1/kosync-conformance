@@ -1,0 +1,146 @@
+name: conformance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Weekly, so a change in the reference image is noticed here rather than by a
+  # user whose sync stopped working.
+  schedule:
+    - cron: "23 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  # The document hash is checked without a server: `document` is opaque to a
+  # server, but every client computes it, and two clients that disagree sync
+  # nothing while both appearing to work.
+  vectors:
+    name: document-hash vectors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # koreader/test-data holds leaves.epub and tall.pdf, whose partial-MD5
+      # digests are pinned in KOReader's own spec/unit/util_spec.lua. Checking
+      # against those is what proves the first sample offset is 0 and not 256.
+      - name: Fetch KOReader test fixtures
+        run: git clone --depth 1 https://github.com/koreader/test-data.git koreader-test-data
+
+      # --big writes a sparse file of 1 GiB + 1024 bytes to exercise the twelfth
+      # sample. ext4 on the runner allocates only the written extents.
+      - name: Check vectors
+        run: node vectors/check.mjs --big --koreader koreader-test-data
+
+  # The important job. Results against the reference implementation are what
+  # "conformant" means; a verifier only ever run against its own author's
+  # server proves nothing.
+  reference:
+    name: reference implementation
+    runs-on: ubuntu-latest
+    services:
+      kosync:
+        image: koreader/kosync:latest
+        ports:
+          # 17200 is the plaintext listener. 7200 serves HTTPS with a
+          # self-signed certificate that Node's fetch rejects.
+          - 8080:17200
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Wait for the reference server
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf -m 2 -H 'Accept: application/vnd.koreader.v1+json' \
+                 http://127.0.0.1:8080/healthcheck | grep -q '"state":"OK"'; then
+              echo "ready after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "reference server never became healthy" >&2
+          exit 1
+
+      - name: Register the second account for the isolation check
+        run: |
+          curl -sf -X POST http://127.0.0.1:8080/users/create \
+            -H 'Accept: application/vnd.koreader.v1+json' \
+            -H 'Content-Type: application/json' \
+            -d "{\"username\":\"ciuser2\",\"password\":\"$(printf secondpass | md5sum | cut -d' ' -f1)\"}"
+
+      # --strict-accept because the reference server REQUIRES the vendor Accept
+      # header and uses it to select the API version (SPEC.md §3.3). Without
+      # the flag, correct behaviour would be reported as a deviation.
+      - name: Verify
+        run: |
+          node verify.mjs \
+            --base-url http://127.0.0.1:8080 \
+            --user ciuser1 --password cipass1 --register \
+            --strict-accept \
+            --second-user ciuser2 --second-password secondpass \
+            --json reference-report.json
+
+      - name: Summarise
+        if: always()
+        run: |
+          if [ -f reference-report.json ]; then
+            node -e '
+              const r = require("./reference-report.json");
+              const s = r.summary;
+              const line = (t) => process.stdout.write(t + "\n");
+              line("## Reference implementation");
+              line("");
+              line("| | |");
+              line("|---|---|");
+              line(`| passed | ${s.PASS} |`);
+              line(`| MUST failures | ${s.mustFailures} |`);
+              line(`| SHOULD failures | ${s.shouldFailures} |`);
+              line(`| verdict | ${r.conformant ? "conformant" : "NOT conformant"} |`);
+              const failed = r.assertions.filter((a) => a.status === "FAIL");
+              if (failed.length) {
+                line("");
+                line("| level | id | assertion | actual |");
+                line("|---|---|---|---|");
+                for (const a of failed) {
+                  line(`| ${a.level} | \`${a.id}\` | ${a.title} | ${String(a.actual).replace(/\|/g, "\\|").slice(0, 120)} |`);
+                }
+              }
+            ' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reference-report
+          path: reference-report.json
+
+  lint:
+    name: verifier loads
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --check verify.mjs
+      - run: node --check vectors/check.mjs
+      - run: node --check coverage.mjs
+
+      # Fails if a requirement in SPEC.md has neither an assertion in
+      # verify.mjs nor a row in §12.4 explaining why it cannot have one, or if
+      # verify.mjs asserts an identifier SPEC.md does not define. Without this
+      # the specification and its test suite drift apart silently.
+      - name: Spec and verifier agree
+        run: node coverage.mjs
+      # --help exits 2 by design; assert that rather than letting it fail CI.
+      - run: |
+          node verify.mjs --help && code=0 || code=$?
+          test "$code" = 2 || { echo "expected exit 2 from --help, got $code" >&2; exit 1; }
