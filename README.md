@@ -58,7 +58,10 @@ be reached. `--json report.json` writes the same thing for CI to gate on.
 Requirements are levelled. A **MUST** failure means a stock KOReader client
 will misbehave against your server. A **SHOULD** failure means you deviate from
 the reference in a way no reference client notices — most often by omitting the
-numeric `code` in error bodies.
+numeric `code` in error bodies. A **MAY** requirement belongs to an optional
+feature: the verifier probes for the feature, skips its requirements on a server
+that does not implement it, and checks them in full on one that does. Only MUST
+decides the exit status.
 
 Full options, profile flags for intentional deviations, and what the verifier
 writes to your server: see [Running the verifier](#running-the-verifier) below.
@@ -139,6 +142,13 @@ skipped or inverted rather than reported as failures.
 | `--registration-off` | registration exists but is deliberately disabled |
 | `--no-healthcheck` | no `GET /healthcheck` |
 | `--strict-accept` | the server is *expected* to require `Accept: application/vnd.koreader.v1+json`, as the reference does |
+
+### Optional features
+
+Optional features are detected, not declared. Each is probed once before the
+suites run, and a server that does not implement one has its `MAY` requirements
+skipped rather than failed. The JSON report records what was found under
+`features`, alongside the per-requirement results.
 
 ### Output
 

@@ -57,6 +57,10 @@ Every factual claim below is one of:
 sense, but note §1.1: the authority is the reference implementation, not this
 document's use of capital letters.
 
+A `MAY` requirement belongs to an **optional feature**. A server is free not to
+implement one, and is held to all of it if it does: optional to offer is not
+optional to get right. §12.5 describes how the verifier tells the two apart.
+
 Normative statements carry a bracketed identifier, for example **[K-AUTH-2]**.
 The conformance verifier in §12 cites those identifiers, so every requirement
 here is either mechanically checked or explicitly listed as untestable in
@@ -1810,6 +1814,34 @@ define. It runs in CI.
 | `[K-SYNC-1]` … `[K-SYNC-6]` conflict resolution | Entirely client-side; the server never compares anything. The verifier asserts the server-side preconditions instead: `timestamp` present (`[K-FLD-13]`), in seconds (`[K-FLD-14]`), server-generated (`[K-PUT-4]`), and last-write-wins (`[K-PUT-5]`). |
 | `[K-DOC-1]` … `[K-DOC-10]` document identity | Not a server behaviour: `document` is opaque to a server, and four of the eight surveyed servers never compute it (§11.1). Checked by `vectors/check.mjs` against the golden vectors of §8.6, not over HTTP. |
 
+
+### 12.5 Optional features
+
+An optional feature groups the `MAY` requirements of one capability. The
+verifier probes for each feature once, before the suites run, and prints what it
+found:
+
+```
+Optional features
+  no   [<key>] <what the feature is>
+         SPEC.md <section>
+```
+
+A feature the server does not implement has every one of its requirements
+recorded as `SKIP`. A feature it does implement is checked in full, and a
+failure there is reported without changing the exit status, because conformance
+is decided by `MUST` alone.
+
+Detection is a probe, not a command-line flag. A server that has to be described
+to the verifier in order to be scored correctly will sooner or later be
+described wrongly, and the resulting failures say nothing about the server.
+
+The JSON report carries each outcome under `features`, so CI can gate on whether
+a capability is present as well as on whether it is correct:
+
+```json
+"features": { "<key>": { "present": false, "section": "<section>", "note": null } }
+```
 
 ---
 
