@@ -855,6 +855,43 @@ An entry is a `{type, value}` pair. `type` is an **opaque label chosen by the
 client**: the server stores and echoes it without interpreting it, so a new
 kind of identifier needs no server change (`identifiers.lua:1-3`).
 
+##### Type registry
+
+`type` is opaque **to the server**, which stores and echoes it without
+interpreting it. It is not opaque to clients: `progress_match` is a trust
+signal, and a client decides whether to follow another device's `progress`
+string on the strength of a shared label. Two clients that compute the same
+label differently therefore disagree about what they have agreed on, so a label
+without a recipe is not interoperable.
+
+| `type` | value | changes when |
+|---|---|---|
+| `content` | the document's own digest over the file bytes, as §8 derives it | any byte of the file changes |
+| `structure` | md5 over the OPF `dc:identifier` when the container has one, followed by every spine item's `href` in reading order, `\n`-separated | the edition, or the chapter list or its order, changes |
+| `filename` | md5 of the file name, as §8.5 derives it | the file is renamed |
+
+**[K-ID-14]** A client **MUST NOT** treat a `progress_match` type it does not
+recognise as sufficient to follow a `progress` string. An unrecognised label
+carries no guarantee about the file the position was written against, so it is
+`percentage` that applies, not the stored position.
+
+`structure` deliberately covers **no file contents.** The tools that motivate
+this section rewrite them: CrossPoint's EPUB optimizer re-encodes images to
+JPEG through a canvas, injects a stylesheet into every chapter's `<head>` and
+rewrites `<img src>` when it splits an image, so every entry's bytes change
+while the spine does not. A digest over entry CRCs survives recompression and
+fails against the very tool this exists for. The spine href list is also exactly
+what an xpointer counts — `/body/DocFragment[N]` is the Nth spine entry — so a
+`structure` match says precisely that the position's chapter index means the
+same thing here.
+
+**There is no `metadata` type.** A digest over title and author is the only
+identifier that can match two genuinely different files, and `[K-ID-12]` never
+repoints an alias. Two books a library has tagged alike merge on it, and until
+`[K-ID-12b]` the merge outlived the tagging being corrected. The recompression
+case is covered by `structure`, so the type bought cross-edition matching at the
+cost of the only unrecoverable failure in the section.
+
 | Rule | Value | Citation |
 |---|---|---|
 | Maximum entries per request | **8** | `identifiers.lua:7` |
@@ -969,8 +1006,20 @@ match, but it cannot move one book's position onto another book's record.
 
 **[K-ID-12]** An alias is **created, never repointed.** The write path writes
 an alias only when none exists, or when the one that exists points at a
-document that is gone (`syncs_controller.lua:105-110`). A digest that has
+document that is gone (`syncs_controller.lua:115-120`). A digest that has
 resolved to a record keeps resolving to it.
+
+**[K-ID-12b]** An identifier the caller ranks **above** the one that matched is
+**not registered at all** (`syncs_controller.lua:110`). Matching on a weak
+identifier is a guess; registering the caller's stronger digests as aliases to
+that guess would make a wrong one permanent, because `[K-ID-12]` never repoints
+and no endpoint unlinks. Two books a library has tagged alike share only their
+weakest identifier, and without this rule the second one pushed takes the first
+one's record, overwrites the position stored there, and cannot be separated
+again by correcting the tagging — its own content digest has been glued to the
+other record on the way through. Confining a wrong guess to the identifier that
+made it is what makes it recoverable. On a **create** the record is the caller's
+own, so every identifier it offers describes it and all of them are registered.
 
 **[K-ID-10]** Aliases are namespaced per account, like positions
 (`[K-ISO-1]`). **[K-ID-13]** They live under the account's `user:<username>:`
@@ -2085,6 +2134,7 @@ reach `MUST` and be charged to every server.
 | `[K-FLD-8]` device self-detection | Client-side. The server precondition — that `device_id` round-trips — is `[K-FLD-7]`. |
 | `[K-SYNC-1]` … `[K-SYNC-6]` conflict resolution | Entirely client-side; the server never compares anything. The verifier asserts the server-side preconditions instead: `timestamp` present (`[K-FLD-13]`), in seconds (`[K-FLD-14]`), server-generated (`[K-PUT-4]`), and last-write-wins (`[K-PUT-5]`). |
 | `[K-ID-12]` an alias is created, never repointed | Not observable over HTTP: the alias table is private, and every wire consequence of it is already asserted — resolution is stable (`[K-ID-4]`) and a document that exists in its own right is never shadowed (`[K-ID-7]`). Proposed; see §5.8. |
+| `[K-ID-14]` a client must not follow a position on an unrecognised `progress_match` | Client-side. The server reports the type and acts on it in no way, so nothing over the wire distinguishes a client that honours this from one that ignores it. Checkable only by inspecting a client. Proposed; see §5.8. |
 | `[K-ID-13]` aliases are removed with the account | Same reason as `[K-DEL-1]`: probing `DELETE /users/me` would delete the account under test. Proposed; see §5.8. |
 | `[K-DOC-1]` … `[K-DOC-10]` document identity | Not a server behaviour: `document` is opaque to a server, and four of the eight surveyed servers never compute it (§11.1). Checked by `vectors/check.mjs` against the golden vectors of §8.6, not over HTTP. |
 
