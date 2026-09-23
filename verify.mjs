@@ -1062,6 +1062,7 @@ const ID_ASSERTIONS = [
   ["K-ID-6b", "progress_match is none when the reader shares nothing with the writer"],
   ["K-ID-6c", "a progress string written without identifiers is attributed to its own digest"],
   ["K-ID-7", "an alias never shadows a document that exists in its own right"],
+  ["K-ID-12b", "a weak match does not register the identifiers ranked above it"],
   ["K-ID-8", "an identifier list that does not name the document is rejected"],
   ["K-ID-8b", "the document need not be first, and the record is created under it"],
   ["K-ID-9", "more than 8 identifiers is rejected"],
@@ -1277,6 +1278,35 @@ async function identifierSuite() {
         ?? `own: document ${fmt(own.json?.document)} progress ${fmt(own.json?.progress)}; other: document ${fmt(other.json?.document)} progress ${fmt(other.json?.progress)}`,
       note: other.json?.progress !== XP
         ? "a weak identifier moved one book's position onto another book's record. An alias must lose a race against a digest that is a document in its own right, not win it."
+        : undefined,
+    });
+  }
+
+  {
+    // Two unrelated books a library tagged alike: they share only the weakest
+    // identifier the client offers.
+    const shared = dg("shared");
+    const b1 = dg("b1"), b1s = dg("b1s");
+    const b2 = dg("b2"), b2s = dg("b2s");
+    await put(b1, [["content", b1], ["structure", b1s], ["weak", shared]], XP, 0.8);
+    const merged = await put(b2, [["content", b2], ["structure", b2s], ["weak", shared]], "/body/p[1]", 0.01);
+
+    // The tagging is corrected, so nothing is shared any more. The second book
+    // gets its own record back only if its content digest was never registered.
+    const corrected = [["content", b2], ["structure", b2s], ["weak", dg("shared2")]];
+    const after = await put(b2, corrected, "/body/p[4]", 0.05);
+    const read = await get(b2, corrected);
+    assert({
+      id: "K-ID-12b", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-12b"],
+      ok: merged.json?.match === "weak" && merged.json?.document === b1
+        && after.status === 200 && after.json?.document === b2 && after.json?.match === "content"
+        && read.json?.percentage === 0.05,
+      expected: `the weak match resolves to ${b1}; once it no longer matches, ${b2} is its own record again`,
+      actual: merged.error ?? after.error ?? read.error
+        ?? `weak match: ${fmt(merged.json)}; after correcting: ${fmt(after.json)}; read: ${fmt(read.json?.percentage)}`,
+      note: after.json?.document === b1
+        ? "the caller's content digest was registered as an alias to a record found on its weakest identifier, so a wrong match is permanent: correcting what caused it does not free the copy. An alias created here is never repointed and nothing unlinks one."
         : undefined,
     });
   }
