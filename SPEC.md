@@ -879,13 +879,17 @@ carries no guarantee about the file the position was written against, so it is
 identically or the label means nothing. The recipe, exactly:
 
 1. Take the `<package>` element's `unique-identifier` attribute and find the
-   `<dc:identifier>` whose `id` matches it. Failing that, take the first
-   `<dc:identifier>`. Trim it. If the result is non-empty, it is the first line.
+   `<dc:identifier>` whose `id` matches it — the first, if several do. Trim it.
+   If the result is empty, or no element matches, fall back to the first
+   `<dc:identifier>` whose trimmed text is non-empty. That value is the first
+   line; if there is none, there is no first line. Trimming removes the XML
+   whitespace characters (space, tab, CR, LF) and nothing else.
 2. Walk `<spine>` in document order. For each `<itemref>`, resolve its `idref`
    against `<manifest>` and take that item's `href` **exactly as written** in
    the attribute: not percent-decoded, not resolved against the OPF directory,
    not reduced to a basename, and **not XML-entity-decoded** — an `href` written
-   `a&amp;b/ch2.xhtml` contributes those eighteen characters, not sixteen. Strip
+   `a&amp;b/ch2.xhtml` contributes those seventeen characters, not the thirteen
+   it decodes to. Strip
    a `#fragment` if one is present. Each is a line, in spine order.
 3. Join the lines with `\n`, with no trailing newline, and take the md5 of the
    UTF-8 bytes.
@@ -900,14 +904,18 @@ defensible choice and disagree:
   `<spine>` are the same element and `<identifier>` under a default Dublin Core
   namespace counts as `<dc:identifier>`. Attribute values are not namespaced.
 - **An `<itemref>` whose `idref` resolves to no manifest item contributes no
-  line**, and does not invalidate the digest.
+  line**, and does not invalidate the digest. So does one that resolves to an
+  `<item>` carrying no `href`: no href, no line, rather than an empty one.
 - **`linear="no"` items are included.** They are spine entries, and the
   renderer's `DocFragment` numbering counts them.
 - `<item>` is looked up within `<manifest>`, `<itemref>` within `<spine>`, and
   `<dc:identifier>` within `<metadata>`.
-- **The OPF is the first `<rootfile>`** in `META-INF/container.xml`, whatever
-  its `media-type`. Its `full-path` is used as an archive member name as
-  written; if no member matches, there is no digest rather than a guessed one.
+- **The OPF is the first `<rootfile>` whose `media-type` is
+  `application/oebps-package+xml`**, or the first `<rootfile>` of any type when
+  none declares it. Its `full-path` is used as an archive member name as written;
+  if no member matches, there is no digest rather than a guessed one. Preferring
+  the declared package document keeps this from disagreeing with whatever a
+  reader already opens for a multi-rendition container.
 
 `structure` deliberately covers **no file contents.** The tools that motivate
 this section rewrite them: CrossPoint's EPUB optimizer re-encodes images to
