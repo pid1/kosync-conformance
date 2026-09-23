@@ -867,13 +867,30 @@ without a recipe is not interoperable.
 | `type` | value | changes when |
 |---|---|---|
 | `content` | the document's own digest over the file bytes, as §8 derives it | any byte of the file changes |
-| `structure` | md5 over the OPF `dc:identifier` when the container has one, followed by every spine item's `href` in reading order, `\n`-separated | the edition, or the chapter list or its order, changes |
+| `structure` | md5 over the spine, as defined below | the edition, or the chapter list or its order, changes |
 | `filename` | md5 of the file name, as §8.5 derives it | the file is renamed |
 
 **[K-ID-14]** A client **MUST NOT** treat a `progress_match` type it does not
 recognise as sufficient to follow a `progress` string. An unrecognised label
 carries no guarantee about the file the position was written against, so it is
 `percentage` that applies, not the stored position.
+
+`structure` is computed from the OPF, and two clients have to compute it
+identically or the label means nothing. The recipe, exactly:
+
+1. Take the `<package>` element's `unique-identifier` attribute and find the
+   `<dc:identifier>` whose `id` matches it. Failing that, take the first
+   `<dc:identifier>`. Trim it. If the result is non-empty, it is the first line.
+2. Walk `<spine>` in document order. For each `<itemref>`, resolve its `idref`
+   against `<manifest>` and take that item's `href` **exactly as written** in
+   the attribute: not percent-decoded, not resolved against the OPF directory,
+   not reduced to a basename. Strip a `#fragment` if one is present. Each is a
+   line, in spine order.
+3. Join the lines with `\n`, with no trailing newline, and take the md5 of the
+   UTF-8 bytes.
+
+A container with no spine, or one that is not an OPF-bearing archive, has no
+`structure` digest and the identifier is omitted rather than guessed.
 
 `structure` deliberately covers **no file contents.** The tools that motivate
 this section rewrite them: CrossPoint's EPUB optimizer re-encodes images to
