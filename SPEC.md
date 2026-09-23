@@ -864,11 +864,21 @@ kind of identifier needs no server change (`identifiers.lua:1-3`).
 | Empty list | rejected | `identifiers.lua:64-66` |
 | Order | the client's **order of preference**, strongest first | `identifiers.lua:49-50` |
 
-**[K-ID-8]** The **first entry's `value` MUST equal `document`**
-(`syncs_controller.lua:184-186`). A list that does not is rejected with **403**
+**[K-ID-8]** The list **MUST contain an entry whose `value` equals `document`**
+(`syncs_controller.lua:197-202`). A list that does not is rejected with **403**
 code **2003**, on both the write and the read. This is what keeps `document`
-meaning *"the identifier I would send if you only took one"*, so an old client
-and a new one addressing the same file address the same record.
+meaning *"the identifier I would send if you only took one"*: the record stays
+addressable by the digest a client naming no identifiers sends, and a read that
+names none follows no alias to reach it (`[K-ID-1b]`).
+
+**[K-ID-8b]** That entry **need not be first.** Position in the list carries
+preference, not identity. When nothing resolves, the record is created under
+`document` rather than under the first entry, and `match` is that entry's type
+(`syncs_controller.lua:104-109`). Pinning it to the first position would force a
+client whose `document` digest is its weakest identifier to offer that one first
+and be matched on it — which is what KOReader sends when its document matching
+is set to the filename, and it would report `progress_match: "filename"` for a
+copy whose content is byte-identical.
 
 **[K-ID-9]** A list of more than **8** entries is rejected with **403** code
 **2003** (`identifiers.lua:67-69`, `:103-105`). Exactly 8 is accepted. Each
