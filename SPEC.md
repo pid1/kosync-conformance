@@ -885,12 +885,9 @@ identically or the label means nothing. The recipe, exactly:
    line; if there is none, there is no first line. Trimming removes the XML
    whitespace characters (space, tab, CR, LF) and nothing else.
 2. Walk `<spine>` in document order. For each `<itemref>`, resolve its `idref`
-   against `<manifest>` and take that item's `href` **exactly as written** in
-   the attribute: not percent-decoded, not resolved against the OPF directory,
-   not reduced to a basename, and **not XML-entity-decoded** — an `href` written
-   `a&amp;b/ch2.xhtml` contributes those seventeen characters, not the thirteen
-   it decodes to. Strip
-   a `#fragment` if one is present. Each is a line, in spine order.
+   against `<manifest>` and take that item's `href`: **not** percent-decoded,
+   **not** resolved against the OPF directory, **not** reduced to a basename.
+   Strip a `#fragment` if one is present. Each is a line, in spine order.
 3. Join the lines with `\n`, with no trailing newline, and take the md5 of the
    UTF-8 bytes.
 
@@ -900,6 +897,12 @@ A container with no spine, or one that is not an OPF-bearing archive, has no
 The rest of the recipe, because two implementations will otherwise each make a
 defensible choice and disagree:
 
+- **Every value here is the one an XML parser yields, with entity references
+  expanded** — the identifier, the hrefs and `full-path` alike. An `href` written
+  `a&amp;b/ch2.xhtml` contributes the thirteen characters `a&b/ch2.xhtml`. Raw
+  source bytes are used nowhere. Expanding is what a parser does without being
+  asked; keeping a value raw means going out of its way, and a rule that is
+  harder to obey is one two implementations will obey differently.
 - **Element names are matched on the local name**, so `<opf:spine>` and
   `<spine>` are the same element and `<identifier>` under a default Dublin Core
   namespace counts as `<dc:identifier>`. Attribute values are not namespaced.
@@ -912,8 +915,9 @@ defensible choice and disagree:
   `<dc:identifier>` within `<metadata>`.
 - **The OPF is the first `<rootfile>` whose `media-type` is
   `application/oebps-package+xml`**, or the first `<rootfile>` of any type when
-  none declares it. Its `full-path` is used as an archive member name as written;
-  if no member matches, there is no digest rather than a guessed one. Preferring
+  none declares it. Its `full-path`, as the parser yields it, is the archive
+  member name; if no member matches, there is no digest rather than a guessed
+  one. Preferring
   the declared package document keeps this from disagreeing with whatever a
   reader already opens for a multi-rendition container.
 
