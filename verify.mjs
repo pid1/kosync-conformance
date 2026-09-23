@@ -1065,6 +1065,7 @@ const ID_ASSERTIONS = [
   ["K-ID-12b", "a weak match does not register the identifiers ranked above it"],
   ["K-ID-16", "an entry marked weak is accepted, and a strong match still adopts"],
   ["K-ID-17", "a push resolving only through a weak entry does not adopt that record"],
+  ["K-ID-17b", "the weak entry is still registered, so a later read is seeded through it"],
   ["K-ID-8", "an identifier list that does not name the document is rejected"],
   ["K-ID-8b", "the document need not be first, and the record is created under it"],
   ["K-ID-9", "more than 8 identifiers is rejected"],
@@ -1354,6 +1355,25 @@ async function identifierSuite() {
         ?? `push answered ${fmt(second.json?.document)}; the first record now reads ${fmt(original.json?.progress)} at ${fmt(original.json?.percentage)}`,
       note: second.json?.document === k1
         ? "the second work adopted the first's record through an identifier the caller marked weak, and overwrote the position stored there. A weak identifier seeds a reader; it does not claim a record."
+        : undefined,
+    });
+
+    // K-ID-17 on its own cannot tell "did not adopt" from "never registered the
+    // weak value at all": a server that skipped weak aliases would create k2,
+    // leave k1 alone, and pass it vacuously. Weakness governs adoption, not
+    // registration, so a third copy sharing only the weak value must still be
+    // seeded from the first record.
+    const k3 = dg("wk3");
+    const seeded = await get(k3, [["content", k3], ["metadata", shared]]);
+    assert({
+      id: "K-ID-17b", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-17b"],
+      ok: seeded.status === 200 && seeded.json?.document === k1
+        && seeded.json?.progress === XP && seeded.json?.progress_match === "metadata",
+      expected: `200 resolving to ${k1} through the weak value, progress_match "metadata"`,
+      actual: seeded.error ?? `${seeded.status} ${fmt(seeded.json ?? seeded.text)}`,
+      note: isObject(seeded.json) && seeded.json.percentage === undefined
+        ? "the weak identifier resolved nothing, so it was never registered as an alias. Weakness governs whether a write claims a record, not whether the value is indexed — without the alias there is nothing to seed a later copy from, which is the whole reason the type exists."
         : undefined,
     });
   }
