@@ -900,6 +900,26 @@ while nothing tells a writer not to clobber on one.
 A client **MUST** mark as weak any identifier that can match a different work.
 `metadata` is always weak. `content` and `structure` never are.
 
+Five things the rule would otherwise leave to each implementation:
+
+- **"Only through a weak entry" means the entry the walk stopped on.** The walk
+  stops at the first hit (`[K-ID-5]`) and does not continue past a weak one
+  looking for a strong hit further down. Under `[K-ID-5b]` the two readings
+  coincide, since weak entries sort last; they differ only for a client that
+  breaks the ordering rule.
+- **`weak` is a boolean.** Anything else is rejected with **403** code **2003**,
+  like any other malformed entry. Reading a non-boolean as strong is exactly the
+  clobber the flag exists to prevent.
+- **`match` on a non-adopting write is the create rule** (`[K-ID-8b]`): the type
+  of the entry whose value equals `document`, not the weak type that resolved
+  the walk.
+- **Weakness governs adoption, not registration.** A weak entry at or below the
+  match is still registered as an alias, whether or not the write adopted. That
+  is what lets a later read be seeded at all.
+- **The stored writer list does not record the flag.** `progress_match` reports
+  the shared type and leaves the judgement to the reader, so weakness is not
+  recoverable after the write.
+
 **[K-ID-15]** A client **offers only the types it can compute honestly.** The
 registry is not a set a client has to fill: a type whose recipe it cannot follow
 for the book in hand is omitted, not approximated. A client that can derive no
