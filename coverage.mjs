@@ -83,7 +83,12 @@ for (const line of table.split("\n")) {
 
 // An assertion may refine a requirement with a suffix (K-CT-3 -> K-CT-3b), and
 // §12.4 may cover a family with a trailing dash (K-SYNC- covers K-SYNC-4).
-const assertedFor = (id) => asserted.has(id) || [...asserted].some((a) => a.startsWith(id));
+//
+// A refinement suffix is never a digit: without that, K-ID-16 counts as covered
+// by an assertion for K-ID-1, and every requirement numbered past 9 is checked
+// against the wrong one.
+const refines = (a, id) => a.startsWith(id) && !/^\d/.test(a.slice(id.length));
+const assertedFor = (id) => asserted.has(id) || [...asserted].some((a) => refines(a, id));
 const untestableFor = (id) => {
   if (untestable.has(id)) return untestable.get(id);
   for (const [key, reason] of untestable) {
@@ -103,7 +108,7 @@ for (const id of [...defined].sort()) {
   }
 }
 
-const undefinedIds = [...asserted].filter((a) => !defined.has(a) && ![...defined].some((d) => a.startsWith(d))).sort();
+const undefinedIds = [...asserted].filter((a) => !defined.has(a) && ![...defined].some((d) => refines(a, d))).sort();
 
 if (list) {
   const w = Math.max(...rows.map((r) => r[0].length));
