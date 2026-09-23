@@ -905,7 +905,22 @@ defensible choice and disagree:
   harder to obey is one two implementations will obey differently.
 - **Element names are matched on the local name**, so `<opf:spine>` and
   `<spine>` are the same element and `<identifier>` under a default Dublin Core
-  namespace counts as `<dc:identifier>`. Attribute values are not namespaced.
+  namespace counts as `<dc:identifier>`. **Attribute names are matched
+  literally and unprefixed** — `href`, `id`, `idref`, `full-path`, `media-type`,
+  `unique-identifier`. An unprefixed attribute is in no namespace, so `opf:href`
+  is a different attribute rather than the same one, and the package format
+  writes these unprefixed.
+- **An element's value is its complete character data, concatenated**, not the
+  first text node. A parser may split a run at an entity reference or a buffer
+  boundary, and two that split differently must still agree.
+- **Only the five predefined XML entities and numeric character references are
+  expanded**: `&amp; &lt; &gt; &quot; &apos;`, `&#nnn;` and `&#xHH;`. Any other
+  undeclared reference makes the document not well-formed, and a digest taken
+  from one is undefined rather than wrong — a conforming parser rejects the
+  document where a lenient one may expand an HTML name it happens to know.
+- A package that puts `<item>` outside `<manifest>` is malformed, and resolves
+  no spine entry, so it has **no** `structure` digest rather than one computed
+  from whatever was found elsewhere.
 - **An `<itemref>` whose `idref` resolves to no manifest item contributes no
   line**, and does not invalidate the digest. So does one that resolves to an
   `<item>` carrying no `href`: no href, no line, rather than an empty one.
