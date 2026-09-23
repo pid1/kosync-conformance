@@ -6,8 +6,14 @@
  * being prose. This fails if either:
  *
  *   - a requirement is defined in SPEC.md but is neither asserted by verify.mjs
- *     nor listed in SPEC.md §12.4 as untestable, with a reason; or
- *   - verify.mjs asserts an identifier that SPEC.md does not define.
+ *     nor listed in SPEC.md §12.4 as untestable, with a reason;
+ *   - verify.mjs asserts an identifier that SPEC.md does not define; or
+ *   - a PROPOSED requirement belongs to no optional feature, which would hold
+ *     every server to an unmerged proposal.
+ *
+ * A requirement is proposed if it is defined under a heading whose text says
+ * so. Those are counted separately, because "SPEC.md defines N requirements"
+ * should not quietly grow by things no released server implements.
  *
  *   node coverage.mjs           # report and exit non-zero on a gap
  *   node coverage.mjs --list    # also print the full mapping
@@ -21,7 +27,27 @@ const list = process.argv.includes("--list");
 
 // A requirement is DEFINED by a bold identifier at the head of a statement:
 //   **[K-GET-3]** ...        or        **[K-GET-3] An unknown document ...**
-const defined = new Set([...spec.matchAll(/\*\*\[(K-[A-Z0-9-]+)\]/g)].map((m) => m[1]));
+const DEFINITION = /\*\*\[(K-[A-Z0-9-]+)\]/g;
+const defined = new Set([...spec.matchAll(DEFINITION)].map((m) => m[1]));
+
+// PROPOSED requirements: defined under a heading that says "proposed". The
+// heading owns everything up to the next heading of the same or higher level.
+const proposed = new Set();
+for (const m of spec.matchAll(/^(#{2,4}) .*$/gm)) {
+  if (!/proposed/i.test(m[0])) continue;
+  const rest = spec.slice(m.index + m[0].length);
+  const next = rest.search(new RegExp(`^#{1,${m[1].length}} `, "m"));
+  for (const d of (next === -1 ? rest : rest.slice(0, next)).matchAll(DEFINITION)) proposed.add(d[1]);
+}
+
+// verify.mjs registers each optional feature with the identifier prefix its
+// requirements share, and refuses at run time to record one of them without
+// naming the feature. What that cannot catch is a proposed requirement attached
+// to no feature at all, which would be checked as MUST against every server.
+const optional = [...verifier.matchAll(/requirements:\s*"(K-[A-Z0-9-]+)"/g)].map((m) => m[1]);
+const unattached = [...proposed]
+  .filter((id) => !optional.some((prefix) => id.startsWith(prefix)))
+  .sort();
 
 // ASSERTED by the verifier.
 const asserted = new Set([...verifier.matchAll(/id:\s*"(K-[A-Za-z0-9-]+)"/g)].map((m) => m[1]));
@@ -91,6 +117,7 @@ const counts = rows.reduce((a, [, s]) => ((a[s] = (a[s] ?? 0) + 1), a), {});
 process.stdout.write(
   `SPEC.md defines ${defined.size} requirements: ` +
     `${counts.asserted ?? 0} asserted, ${counts.untestable ?? 0} declared untestable, ${gaps.length} unaccounted for.\n` +
+    `${proposed.size} of them are PROPOSED (unmerged upstream), and belong to an optional feature that a server is probed for.\n` +
     `verify.mjs makes ${asserted.size} distinct assertions.\n`,
 );
 
@@ -100,6 +127,12 @@ if (gaps.length) {
   process.stdout.write(`\nRequirements with neither an assertion nor an entry in §12.4:\n`);
   for (const id of gaps) process.stdout.write(`  ${id}\n`);
   process.stdout.write(`\nEither assert them in verify.mjs, or add a row to SPEC.md §12.4 saying why not.\n`);
+}
+if (unattached.length) {
+  bad = true;
+  process.stdout.write(`\nProposed requirements that belong to no optional feature:\n`);
+  for (const id of unattached) process.stdout.write(`  ${id}\n`);
+  process.stdout.write(`\nRegister a feature in verify.mjs whose \`requirements\` prefix covers them, or\nevery server is held to an unmerged proposal.\n`);
 }
 if (undefinedIds.length) {
   bad = true;

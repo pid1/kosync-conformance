@@ -19,8 +19,14 @@ user's reading position quietly stops syncing.
 - **[`reference-server/`](reference-server/)** — how to run the reference
   implementation locally, which was itself undocumented.
 - **[`coverage.mjs`](coverage.mjs)** — fails if a requirement in `SPEC.md` has
-  neither a test nor a written reason why it cannot have one. Runs in CI, so
-  the spec and its test suite cannot drift apart quietly.
+  neither a test nor a written reason why it cannot have one, and if a proposed
+  requirement belongs to no optional feature. Runs in CI, so the spec and its
+  test suite cannot drift apart quietly.
+
+One section is not observed behaviour of a released server: **§5.8 describes an
+open, unmerged pull request** and is pinned to a branch commit. It is an
+optional feature, so a server that does not implement it skips those
+requirements and stays conformant.
 
 This is **not** an official KOReader project and carries no endorsement from
 it. It is a description of observed behaviour. Where it and the reference
@@ -68,16 +74,25 @@ writes to your server: see [Running the verifier](#running-the-verifier) below.
 
 ## Results
 
-Measured 2026-09-21. `verify.mjs` against each server, with the profile flags
+Measured 2026-09-22. `verify.mjs` against each server, with the profile flags
 each one's design calls for.
 
-| Implementation | Version | Passed | MUST failed | SHOULD failed | Verdict |
-|---|---|---:|---:|---:|---|
-| `koreader/koreader-sync-server` (reference) | `koreader/kosync:latest`, OpenResty 1.29.2.3, gin 0.2.0 | 49 | **0** | 2 | conformant |
-| `pid1/tsundoku` | branch `main` | 47 | **0** | 2 | conformant |
+| Implementation | Version | Passed | MUST failed | SHOULD failed | Skipped | Verdict |
+|---|---|---:|---:|---:|---:|---|
+| `koreader/koreader-sync-server` (reference) | `koreader/kosync:latest`, OpenResty 1.29.2.3, gin 0.2.0 | 49 | **0** | 2 | 18 | conformant |
+| `pid1/tsundoku` | branch `main` | 47 | **0** | 0 | 20 | conformant |
 
-tsundoku's run skips the two registration assertions, because it closes kosync
-self-registration by design and the run declared `--registration-off`.
+Neither server implements §5.8, and nor does any server you can download, so both
+runs skip its eighteen `[K-ID-…]` requirements. tsundoku's run skips two more,
+the registration assertions, because it closes kosync self-registration by design
+and the run declared `--registration-off`.
+
+Measured 2026-09-22 against `koreader/koreader-sync-server` PR #55 (branch
+`multi-identifier-aliases` at `0c0f5ad`, built locally on OpenResty 1.29.2.3),
+where the probe does find §5.8: **69 passed, 0 MUST failures, 0 SHOULD failures,
+0 skipped**. The 51 outside §5.8 are what the published image is scored on, where
+it passes 49 and fails two SHOULD — that branch also carries the unreleased fix
+for the document-id defect below.
 
 The reference server's two SHOULD failures are a genuine defect in it, not a
 disagreement about the protocol: `PUT` accepts any document id, while `GET`
@@ -165,6 +180,13 @@ The verifier is **not read-only.** It stores reading positions under a handful
 of synthetic document ids derived from `--document`. Those ids are constant
 across runs by design, so a hundred runs leave five rows rather than five
 hundred. Point it at a test account.
+
+The `identifiers` feature of §5.8 is the exception: it allocates **fresh digests
+on every run**, because an alias, once created, is never repointed, so a second
+run over the same digests would resolve through the first run's aliases and
+assert nothing. Against a server that implements it, each run leaves roughly
+twenty document and alias keys behind; against one that does not, it leaves the
+single record its probe writes.
 
 It **never probes `DELETE /users/me`**, because a conformant server would
 delete the account under test.
