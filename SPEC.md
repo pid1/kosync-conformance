@@ -873,7 +873,7 @@ without a recipe is not interoperable.
 | `content` | the document's own digest over the file bytes, as §8 derives it | any byte of the file changes |
 | `structure` | md5 over the spine, as defined below | the edition, or the chapter list or its order, changes |
 | `filename` | md5 of the file name, as §8.5 derives it | the file is renamed |
-| `metadata` | md5 of `"title:" + title + "\n" + "authors:" + authors`, the title lowercased with whitespace runs collapsed and trimmed, the authors normalised the same way, sorted, and joined with `;`. A title with no author yields nothing. **Always weak** (`[K-ID-17]`) | the work's title or authors change |
+| `metadata` | md5 of `"title:" + title + "\n" + "authors:" + authors`, normalised as below. A title with no author yields nothing. **Always weak** (`[K-ID-17]`) | the work's title or authors change |
 
 #### Weak identifiers
 
@@ -919,6 +919,12 @@ Five things the rule would otherwise leave to each implementation:
 - **The stored writer list does not record the flag.** `progress_match` reports
   the shared type and leaves the judgement to the reader, so weakness is not
   recoverable after the write.
+- **A weak entry that is itself the `document` still adopts.** `[K-ID-8]`
+  requires the list to contain an entry equal to `document`, and nothing stops
+  that entry being the weak one — a client whose configured document digest is
+  its weakest identifier is in exactly that position. Writing to the record you
+  are addressed by is not claiming another's, so `[K-ID-17]` does not fire when
+  the entry that resolved the walk carries the `document` value.
 
 **[K-ID-15]** A client **offers only the types it can compute honestly.** The
 registry is not a set a client has to fill: a type whose recipe it cannot follow
@@ -1020,6 +1026,24 @@ fails against the very tool this exists for. The spine href list is also exactly
 what an xpointer counts — `/body/DocFragment[N]` is the Nth spine entry — so a
 `structure` match says precisely that the position's chapter index means the
 same thing here.
+
+The `metadata` normalisation, because three implementations disagreed on it:
+
+- **The authors are the `<dc:creator>` elements of the OPF**, in the order the
+  document gives them, taken from each element's **text** and never from an
+  `opf:file-as` attribute. `<dc:contributor>` is not an author. Each is
+  normalised on its own, then they are **sorted** and joined with `;`.
+- **Case folding is ASCII only.** `A`–`Z` fold to `a`–`z` and nothing else does.
+  A full Unicode fold is not available on every client — a microcontroller has no
+  case table and is not going to carry one — and an identifier two clients fold
+  differently is worse than one that folds less. The cost is a miss on a title
+  whose case varies outside ASCII, which for a weak identifier is the safe
+  direction.
+- **Whitespace is the XML set**, space, tab, CR and LF, as in the `structure`
+  recipe. Runs collapse to one space and the ends are trimmed. No other
+  character is whitespace.
+- A value that normalises to nothing is absent, and an absent title or an empty
+  author list yields no `metadata` digest at all.
 
 `metadata` is the only identifier that survives a **spine change**, so it is the
 only one that reaches a different edition or a re-chunked conversion. It is also
