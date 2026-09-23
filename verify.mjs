@@ -653,7 +653,7 @@ async function main() {
       note: "KOReader sets PROGRESS_TIMEOUTS = {2, 5}; a slower answer is a failed push that gets queued for retry",
     });
     assert({
-      id: "K-PUT-202", section: "§5.4", level: "MUST",
+      id: "K-PUT-7", section: "§5.4", level: "MUST",
       title: "the server does not emit 202",
       ok: r.status !== 202,
       expected: "not 202 — api.json declares it but no client treats it as success",
@@ -1063,6 +1063,8 @@ const ID_ASSERTIONS = [
   ["K-ID-6c", "a progress string written without identifiers is attributed to its own digest"],
   ["K-ID-7", "an alias never shadows a document that exists in its own right"],
   ["K-ID-12b", "a weak match does not register the identifiers ranked above it"],
+  ["K-ID-16", "an entry marked weak is accepted, and a strong match still adopts"],
+  ["K-ID-17", "a push resolving only through a weak entry does not adopt that record"],
   ["K-ID-8", "an identifier list that does not name the document is rejected"],
   ["K-ID-8b", "the document need not be first, and the record is created under it"],
   ["K-ID-9", "more than 8 identifiers is rejected"],
@@ -1307,6 +1309,51 @@ async function identifierSuite() {
         ?? `weak match: ${fmt(merged.json)}; after correcting: ${fmt(after.json)}; read: ${fmt(read.json?.percentage)}`,
       note: after.json?.document === b1
         ? "the caller's content digest was registered as an alias to a record found on its weakest identifier, so a wrong match is permanent: correcting what caused it does not free the copy. An alias created here is never repointed and nothing unlinks one."
+        : undefined,
+    });
+  }
+
+  {
+    // A weak entry may resolve a read, but it must not let a write claim a
+    // record that already exists.
+    const k1 = dg("wk1"), k1s = dg("wk1s"), shared = dg("wkm");
+    const k2 = dg("wk2"), k2s = dg("wk2s");
+    const weak = (v) => ({ type: "metadata", value: v, weak: true });
+    const listFor = (c, st) => [["content", c], ["structure", st]];
+
+    const mk = (document, c, st, progress, pct) =>
+      call("PUT", "/syncs/progress", {
+        body: {
+          document,
+          identifiers: [...listFor(c, st).map(([type, value]) => ({ type, value })), weak(shared)],
+          progress, percentage: pct, device: "kosync-conformance", device_id: "conformance-device-1",
+        },
+      });
+
+    const first = await mk(k1, k1, k1s, XP, 0.8);
+    assert({
+      id: "K-ID-16", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-16"],
+      ok: first.status === 200 && first.json?.document === k1 && first.json?.match === "content",
+      expected: `200 creating ${k1}, match "content"`,
+      actual: first.error ?? `${first.status} ${fmt(first.json ?? first.text)}`,
+      note: rejected(first)
+        ? "a `weak` flag on an identifier was rejected; it is an optional field on the entry, not a new type"
+        : undefined,
+    });
+
+    const second = await mk(k2, k2, k2s, "/body/p[1]", 0.01);
+    const original = await get(k1, listFor(k1, k1s));
+    assert({
+      id: "K-ID-17", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-17"],
+      ok: second.status === 200 && second.json?.document === k2
+        && original.json?.progress === XP && original.json?.percentage === 0.8,
+      expected: `${k2} written under its own digest, and ${k1} left at ${XP}`,
+      actual: second.error ?? original.error
+        ?? `push answered ${fmt(second.json?.document)}; the first record now reads ${fmt(original.json?.progress)} at ${fmt(original.json?.percentage)}`,
+      note: second.json?.document === k1
+        ? "the second work adopted the first's record through an identifier the caller marked weak, and overwrote the position stored there. A weak identifier seeds a reader; it does not claim a record."
         : undefined,
     });
   }
