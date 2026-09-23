@@ -838,7 +838,7 @@ fields:
 {"document": "C1",
  "identifiers": [{"type": "content",   "value": "C1"},
                  {"type": "structure", "value": "S1"},
-                 {"type": "metadata",  "value": "M"}],
+                 {"type": "filename",  "value": "F"}],
  "percentage": 0.32, "progress": "/body/DocFragment[20]/body/p[22]",
  "device": "my kpw"}
 ```
@@ -848,7 +848,7 @@ query parameter, because a GET has no body and repeated query parameters are
 not reliably ordered (`identifiers.lua:92-94`):
 
 ```
-GET /syncs/progress/C1?ids=content:C1,structure:S1,metadata:M
+GET /syncs/progress/C1?ids=content:C1,structure:S1,filename:F
 ```
 
 An entry is a `{type, value}` pair. `type` is an **opaque label chosen by the
@@ -933,7 +933,7 @@ cost of the only unrecoverable failure in the section.
 | `value` pattern | `^[A-Za-z0-9][A-Za-z0-9-_.]*$`, at most 128 characters | `identifiers.lua:9,15` |
 | Duplicate `type` in one list | rejected | `identifiers.lua:82-85`, `:119-122` |
 | Empty list | rejected | `identifiers.lua:64-66` |
-| Order | the client's **order of preference**, strongest first | `identifiers.lua:49-50` |
+| Order | the client's **order of preference**, strongest first — required, see `[K-ID-5b]` | `identifiers.lua:49-50` |
 
 **[K-ID-8]** The list **MUST contain an entry whose `value` equals `document`**
 (`syncs_controller.lua:197-202`). A list that does not is rejected with **403**
@@ -984,8 +984,8 @@ A `GET` that names identifiers returns today's fields plus two:
 **[K-ID-6]** `match` and `progress_match` answer different questions and
 routinely differ. A reader can match a record on its own content digest —
 `match: "content"`, the record is literally its file — while the position
-stored there was written by a different edition that only shared the metadata
-digest: `progress_match: "metadata"`. The first says *we found your book*, the
+stored there was written by a different book that only shared the file name:
+`progress_match: "filename"`. The first says *we found your book*, the
 second says *how much you should trust this xpointer*. Only `progress_match`
 bears on whether the position can be followed
 (`syncs_controller.lua:350-361`, `identifiers.lua:180-195`).
@@ -1028,6 +1028,18 @@ entries and report different `match` values. The list is a preference order,
 not a set; a server that resolves in its own order gives two clients different
 answers about the same book.
 
+**[K-ID-5b]** A client **MUST** order its identifiers strongest first — most
+specific to the file in hand, least specific last. The registry table above is
+in descending strength order for the types it names. This is not a stylistic
+preference: `[K-ID-12b]` is the protection against a wrong match becoming
+permanent, it is expressed in terms of list position, and a list that opens with
+its weakest identifier matches at the first position and so registers every
+identifier behind it. **Measured 2026-09-23** against the branch above with the
+`[K-ID-12b]` rule in place: two books sharing only a weak identifier, offered
+weakest-first, merge and stay merged after the weak identifier is corrected — the
+same failure `[K-ID-12b]` exists to prevent, reproduced with nothing but a
+different list order. A server cannot check this (§12.4).
+
 **[K-ID-4]** A copy that shares any identifier with a record the account
 already holds resolves to that record, and the response carries the
 **canonical** digest so the next request can address it directly.
@@ -1055,6 +1067,14 @@ other record on the way through. Confining a wrong guess to the identifier that
 made it is what makes it recoverable. On a **create** the record is the caller's
 own, so every identifier it offers describes it and all of them are registered.
 
+What this rule recovers is the **copy**, not the position: the intruding push
+still overwrote what was stored on the other record, and nothing restores that.
+It also has a cost on the benign path. A recompressed copy that matched on
+`structure` never has its own `content` digest registered, on that push or any
+later one, so it depends on the weaker identifier continuing to match and is
+orphaned if the spine later changes. That trade is deliberate, and it is a trade.
+The rule is only as good as `[K-ID-5b]`, which a server cannot enforce.
+
 **[K-ID-10]** Aliases are namespaced per account, like positions
 (`[K-ISO-1]`). **[K-ID-13]** They live under the account's `user:<username>:`
 prefix, so `DELETE /users/me` removes them with everything else
@@ -1062,57 +1082,63 @@ prefix, so `DELETE /users/me` removes them with everything else
 
 #### [measured]
 
-Against the branch above on 2026-09-22, `GIN_ENV=test`, plaintext listener,
-account `reader`:
+Against the branch above at `49dbd38` on 2026-09-23, `GIN_ENV=production`,
+plaintext listener, account `reader`. `C1` is the original, `C2` a recompressed
+copy of it, and `C3` a different book that happens to carry the same file name.
 
 ```
 $ curl -X PUT .../syncs/progress -d '{"document":"C1",
     "identifiers":[{"type":"content","value":"C1"},
                    {"type":"structure","value":"S1"},
-                   {"type":"metadata","value":"M"}],
+                   {"type":"filename","value":"F"}],
     "percentage":0.32,"progress":"/body/DocFragment[20]/body/p[22]",
     "device":"my kpw"}'
-{"document":"C1","timestamp":1790124995,"match":"content"}
+{"document":"C1","timestamp":1790176644,"match":"content"}
 
-# a recompressed copy: different content digest, same structure and metadata
-$ curl '.../syncs/progress/C2?ids=content:C2,structure:S1,metadata:M'
-{"percentage":0.32,"progress_match":"structure","device":"my kpw",
- "match":"structure","document":"C1",
- "progress":"\/body\/DocFragment[20]\/body\/p[22]","timestamp":1790124995}
+# the recompressed copy: different content digest, same spine
+$ curl '.../syncs/progress/C2?ids=content:C2,structure:S1,filename:F'
+{"percentage":0.32,"device":"my kpw","progress_match":"structure",
+ "progress":"\/body\/DocFragment[20]\/body\/p[22]","document":"C1",
+ "timestamp":1790176644,"match":"structure"}
 
-# a different edition writes, sharing only the metadata digest
+# a different book sharing only the file name writes, and takes the record
 $ curl -X PUT .../syncs/progress -d '{"document":"C3",
     "identifiers":[{"type":"content","value":"C3"},
                    {"type":"structure","value":"S3"},
-                   {"type":"metadata","value":"M"}],
+                   {"type":"filename","value":"F"}],
     "percentage":0.5,"progress":"/body/DocFragment[3]/body/p[9]","device":"pb"}'
-{"document":"C1","timestamp":1790124995,"match":"metadata"}
+{"document":"C1","timestamp":1790176644,"match":"filename"}
 
-# the original copy reads again: found by its own digest, written by the other
-$ curl '.../syncs/progress/C1?ids=content:C1,structure:S1,metadata:M'
-{"percentage":0.5,"progress_match":"metadata","device":"pb","match":"content",
- "document":"C1","progress":"\/body\/DocFragment[3]\/body\/p[9]",
- "timestamp":1790124995}
+# the original reads again: found by its own digest, written by the other
+$ curl '.../syncs/progress/C1?ids=content:C1,structure:S1,filename:F'
+{"percentage":0.5,"device":"pb","document":"C1",
+ "progress":"\/body\/DocFragment[3]\/body\/p[9]","progress_match":"filename",
+ "timestamp":1790176644,"match":"content"}
 
 # the same read naming no identifiers: today's body, no new fields
 $ curl '.../syncs/progress/C1'
-{"percentage":0.5,"device":"pb","document":"C1",
- "progress":"\/body\/DocFragment[3]\/body\/p[9]","timestamp":1790124995}
+{"percentage":0.5,"device":"pb","document":"C1","timestamp":1790176644,
+ "progress":"\/body\/DocFragment[3]\/body\/p[9]"}
 
-# first identifier is not the document; nine identifiers
-$ curl '.../syncs/progress/C1?ids=metadata:M'
-403 {"message":"Invalid request","code":2003}
-$ curl -X PUT ... nine entries ...
-403 {"message":"Invalid request","code":2003}
+# a list that names the document nowhere
+$ curl '.../syncs/progress/C1?ids=filename:F'
+403 {"code":2003,"message":"Invalid request"}
 ```
 
-Redis after that sequence — one document, four aliases, all under the account:
+Redis after that sequence — one document and **two** aliases, all under the
+account:
 
 ```
-user:reader:alias:C3      user:reader:alias:M
-user:reader:alias:S1      user:reader:alias:S3
+user:reader:alias:F       user:reader:alias:S1
 user:reader:document:C1   user:reader:key
 ```
+
+`C3` and `S3` are absent, and that is `[K-ID-12b]`. The third push matched on
+`filename`, the weakest identifier it offered, so the two digests it ranked above
+that one were not registered. Had they been, the second book would be reachable
+only through the first book's record for good, and correcting the file name would
+not undo it. What the rule does not undo is the overwrite: `C1` now holds the
+other book's position, and the `my kpw` reading at 0.32 is gone.
 
 #### Running the checks
 
@@ -2167,7 +2193,8 @@ reach `MUST` and be charged to every server.
 | `[K-FLD-12]` `timestamp` is epoch seconds | Asserted as `[K-FLD-14]`, which checks the value is within a day of now and so would catch milliseconds. |
 | `[K-FLD-8]` device self-detection | Client-side. The server precondition — that `device_id` round-trips — is `[K-FLD-7]`. |
 | `[K-SYNC-1]` … `[K-SYNC-6]` conflict resolution | Entirely client-side; the server never compares anything. The verifier asserts the server-side preconditions instead: `timestamp` present (`[K-FLD-13]`), in seconds (`[K-FLD-14]`), server-generated (`[K-PUT-4]`), and last-write-wins (`[K-PUT-5]`). |
-| `[K-ID-12]` an alias is created, never repointed | Not observable over HTTP: the alias table is private, and every wire consequence of it is already asserted — resolution is stable (`[K-ID-4]`) and a document that exists in its own right is never shadowed (`[K-ID-7]`). Proposed; see §5.8. |
+| `[K-ID-12]` an alias is created, never repointed | Not observable over HTTP: the alias table is private, and every wire consequence of it is already asserted — resolution is stable (`[K-ID-4]`), a document that exists in its own right is never shadowed (`[K-ID-7]`), and an identifier above the match is never registered (`[K-ID-12b]`). Proposed; see §5.8. |
+| `[K-ID-5b]` identifiers are ordered strongest first | Client-side, and not inferable from the wire: the server has no idea what any type means, so a weakest-first list is indistinguishable from a strongest-first one whose strongest identifier happens to be the one that matched. Checkable only by inspecting a client. Proposed; see §5.8. |
 | `[K-ID-14]` a client must not follow a position on an unrecognised `progress_match` | Client-side. The server reports the type and acts on it in no way, so nothing over the wire distinguishes a client that honours this from one that ignores it. Checkable only by inspecting a client. Proposed; see §5.8. |
 | `[K-ID-13]` aliases are removed with the account | Same reason as `[K-DEL-1]`: probing `DELETE /users/me` would delete the account under test. Proposed; see §5.8. |
 | `[K-DOC-1]` … `[K-DOC-10]` document identity | Not a server behaviour: `document` is opaque to a server, and four of the eight surveyed servers never compute it (§11.1). Checked by `vectors/check.mjs` against the golden vectors of §8.6, not over HTTP. |
@@ -2361,7 +2388,7 @@ questioning the code's existence (`syncs_controller.lua:17`):
 | Is `202` reachable on any server? | Not among those surveyed. |
 | Is error code `100` reachable? | **No**, in practice — §3.3. Every HTTP client sends a default `Accept`, so the reference server answers `101`. |
 | Will `identifiers` (§5.8) be merged, and in this shape? | **Open.** `koreader/koreader-sync-server#55` is unmerged as of 2026-09-22. §5.8 is pinned to a branch commit for that reason. |
-| What identifier **types** should a client send? | **Undecided, and deliberately not specified.** The server treats `type` as an opaque label and never interprets it (`identifiers.lua:1-3`), so the set can grow without a server change. `content`, `structure` and `metadata` are the branch's own examples; none is computed by any released KOReader build. |
+| What identifier **types** should a client send? | `content`, `structure` and `filename`, with the recipes in the §5.8 registry. The server still treats `type` as an opaque label and never interprets it (`identifiers.lua:1-3`), so the set can grow without a server change — but `progress_match` makes the label a trust signal between clients, so a label without a recipe is not interoperable (`[K-ID-14]`). None of the three is computed by any released KOReader build. |
 | How should a client pick the `document` when it holds several identifiers? | **Open.** §5.8 requires only that the first entry equal `document`. Which identifier that ought to be is a client decision no implementation has yet made. |
 | Does an alias ever expire? | **No, in the proposal.** Aliases are removed only with the account (`[K-ID-13]`). A long-lived account accumulates one alias per distinct identifier it has ever offered, and nothing in the branch bounds that. |
 | Does the official deployment carry the `[K-GET-1a]` router defect? | **[unverified]** — the published image does (measured). Whether `sync.koreader.rocks` runs that image is unknown. |
