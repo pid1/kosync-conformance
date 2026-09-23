@@ -74,22 +74,22 @@ writes to your server: see [Running the verifier](#running-the-verifier) below.
 
 ## Results
 
-Measured 2026-09-22. `verify.mjs` against each server, with the profile flags
+Measured 2026-09-23. `verify.mjs` against each server, with the profile flags
 each one's design calls for.
 
 | Implementation | Version | Passed | MUST failed | SHOULD failed | Skipped | Verdict |
 |---|---|---:|---:|---:|---:|---|
-| `koreader/koreader-sync-server` (reference) | `koreader/kosync:latest`, OpenResty 1.29.2.3, gin 0.2.0 | 49 | **0** | 2 | 18 | conformant |
-| `pid1/tsundoku` | branch `main` | 47 | **0** | 0 | 20 | conformant |
+| `koreader/koreader-sync-server` (reference) | `koreader/kosync:latest`, OpenResty 1.29.2.3, gin 0.2.0 | 49 | **0** | 2 | 20 | conformant |
+| `pid1/tsundoku` | branch `main` | 47 | **0** | 0 | 22 | conformant |
 
 Neither server implements §5.8, and nor does any server you can download, so both
-runs skip its eighteen `[K-ID-…]` requirements. tsundoku's run skips two more,
-the registration assertions, because it closes kosync self-registration by design
-and the run declared `--registration-off`.
+runs skip its twenty `[K-ID-…]` requirements. tsundoku's run skips two more, the
+registration assertions, because it closes kosync self-registration by design and
+the run declared `--registration-off`.
 
-Measured 2026-09-22 against `koreader/koreader-sync-server` PR #55 (branch
-`multi-identifier-aliases` at `0c0f5ad`, built locally on OpenResty 1.29.2.3),
-where the probe does find §5.8: **69 passed, 0 MUST failures, 0 SHOULD failures,
+Measured 2026-09-23 against `koreader/koreader-sync-server` PR #55 (branch
+`multi-identifier-aliases` at `49dbd38`, built locally on OpenResty 1.29.2.3),
+where the probe does find §5.8: **71 passed, 0 MUST failures, 0 SHOULD failures,
 0 skipped**. The 51 outside §5.8 are what the published image is scored on, where
 it passes 49 and fails two SHOULD — that branch also carries the unreleased fix
 for the document-id defect below.
