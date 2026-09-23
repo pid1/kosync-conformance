@@ -123,15 +123,16 @@ const KEY2 = USER2 ? (opts.secondKey ?? (opts.secondPassword && md5(opts.secondP
  * to the verifier to be scored correctly will be described wrongly, and the
  * resulting page of failures says nothing about the server.
  *
- *   key      short identifier, used in the report and in `--json`
- *   title    what the feature is, in a noun phrase
- *   section  the section of SPEC.md that defines it
- *   probe    async, returns a boolean or { present, note }
+ *   key           short identifier, used in the report and in `--json`
+ *   title         what the feature is, in a noun phrase
+ *   section       the section of SPEC.md that defines it
+ *   requirements  the identifier prefix its requirements share
+ *   probe         async, returns a boolean or { present, note }
  */
 const features = new Map();
 
-function feature({ key, title, section, probe }) {
-  features.set(key, { key, title, section, probe, present: undefined, note: undefined });
+function feature({ key, title, section, requirements, probe }) {
+  features.set(key, { key, title, section, requirements, probe, present: undefined, note: undefined });
 }
 
 async function probeFeatures() {
@@ -177,6 +178,11 @@ let networkFailures = 0;
  * a SKIP on a server the probe found does not implement it.
  */
 function assert({ id, section, level, title, ok, expected, actual, skip, note, feature: featureKey }) {
+  // An identifier under a feature's prefix belongs to that feature whether or
+  // not the call site says so. Without this, one omitted `feature` charges a
+  // server for an option it never claimed.
+  const owner = [...features.values()].find((f) => f.requirements && id.startsWith(f.requirements));
+  if (owner && featureKey !== owner.key) throw new Error(`${id} belongs to the feature "${owner.key}" and must say so`);
   if (featureKey !== undefined) {
     const f = features.get(featureKey);
     if (!f) throw new Error(`${id} names the unregistered feature "${featureKey}"`);
@@ -647,7 +653,7 @@ async function main() {
       note: "KOReader sets PROGRESS_TIMEOUTS = {2, 5}; a slower answer is a failed push that gets queued for retry",
     });
     assert({
-      id: "K-PUT-202", section: "§5.4", level: "MUST",
+      id: "K-PUT-7", section: "§5.4", level: "MUST",
       title: "the server does not emit 202",
       ok: r.status !== 202,
       expected: "not 202 — api.json declares it but no client treats it as success",
@@ -954,6 +960,10 @@ async function main() {
     });
   }
 
+  // ===================================================== identifiers
+  section("§5.8  Optional identifier matching (PROPOSED — not merged upstream)");
+  await identifierSuite();
+
   // ===================================================== optional endpoints
   section("§5.6/5.7  Optional server-only endpoints");
 
@@ -981,6 +991,530 @@ async function main() {
   });
 
   return finish();
+}
+
+// -------------------------------------------------- identifiers (proposed)
+
+/**
+ * SPEC.md §5.8 — optional matching of one reading position by several document
+ * identifiers, as proposed in koreader/koreader-sync-server#55. THAT PULL
+ * REQUEST IS NOT MERGED. Every requirement here is MAY: a server that does not
+ * implement it skips the family, and one that does is held to all of it.
+ */
+
+const ID_SECTION = "§5.8";
+const ID_XPOINTER = "/body/DocFragment[11]/body/div/p[7]/text().123";
+
+// Fresh digests per run. An alias is created and never repointed, so a second
+// run against reused ids would resolve through the first run's aliases and
+// assert nothing. Every digest is 32 hex characters, which the reference
+// server's read route can serve ([K-GET-1]).
+const ID_RUN = `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e9).toString(36)}`;
+const dg = (tag) => md5(`${opts.document}:${ID_RUN}:${tag}`);
+
+const idList = (pairs) => pairs.map(([type, value]) => ({ type, value }));
+const idQuery = (pairs) => pairs.map(([type, value]) => `${type}:${value}`).join(",");
+
+const idPut = (document, pairs, progress, percentage = 0.5) =>
+  call("PUT", "/syncs/progress", {
+    body: {
+      document,
+      ...(pairs === null ? {} : { identifiers: Array.isArray(pairs) ? idList(pairs) : pairs }),
+      progress,
+      percentage,
+      device: "kosync-conformance",
+      device_id: "conformance-device-1",
+    },
+  });
+
+const idGet = (document, pairs) =>
+  call("GET", `/syncs/progress/${document}${pairs === null ? "" : `?ids=${typeof pairs === "string" ? pairs : idQuery(pairs)}`}`);
+
+feature({
+  key: "identifiers",
+  title: "multi-identifier document matching",
+  section: ID_SECTION,
+  requirements: "K-ID-",
+  // A push naming identifiers answers with `match` on a server that implements
+  // the proposal and with the pre-proposal body on one that does not. The
+  // proposal adds no endpoint, so there is nothing else to look at.
+  probe: async () => {
+    const id = dg("probe");
+    const r = await idPut(id, [["content", id], ["structure", dg("probe-s")]], ID_XPOINTER, 0.11);
+    if (r.status === 200 && typeof r.json?.match === "string") return true;
+    return {
+      present: false,
+      note: `a push naming identifiers answered ${r.error ?? `${r.status} ${fmt(r.json ?? r.text)}`}, with no \`match\` field`,
+    };
+  },
+});
+
+// Titles, in one place, because the skip path emits the whole family at once.
+const ID_ASSERTIONS = [
+  ["K-ID-1", "a push naming no identifiers returns today's body, with no match field"],
+  ["K-ID-1b", "a read naming no identifiers returns today's body and follows no alias"],
+  ["K-ID-2", "a push naming identifiers returns {document, match, timestamp}"],
+  ["K-ID-3", "match names the identifier type that resolved the lookup"],
+  ["K-ID-3b", "a read naming its own identifiers matches on the first of them"],
+  ["K-ID-4", "a renamed copy resolves through an identifier it shares, and gets the canonical digest"],
+  ["K-ID-5", "the reader's order of preference decides which identifier matches"],
+  ["K-ID-6", "progress_match differs from match when a weaker identifier let another copy write"],
+  ["K-ID-6b", "progress_match is none when the reader shares nothing with the writer"],
+  ["K-ID-6c", "a progress string written without identifiers is attributed to its own digest"],
+  ["K-ID-7", "an alias never shadows a document that exists in its own right"],
+  ["K-ID-12b", "a weak match does not register the identifiers ranked above it"],
+  ["K-ID-16", "an entry marked weak is accepted, and a strong match still adopts"],
+  ["K-ID-17", "a push resolving only through a weak entry does not adopt that record"],
+  ["K-ID-17b", "the weak entry is still registered, so a later read is seeded through it"],
+  ["K-ID-8", "an identifier list that does not name the document is rejected"],
+  ["K-ID-8b", "the document need not be first, and the record is created under it"],
+  ["K-ID-9", "more than 8 identifiers is rejected"],
+  ["K-ID-9d", "exactly 8 identifiers is accepted"],
+  ["K-ID-9b", "a malformed ids parameter is rejected"],
+  ["K-ID-9c", "a duplicate identifier type is rejected"],
+  ["K-ID-10", "one account's aliases do not resolve for another"],
+  ["K-ID-11", "a document unknown under every identifier still returns 200 with an empty body"],
+];
+
+const ID_TITLE = Object.fromEntries(ID_ASSERTIONS);
+
+async function identifierSuite() {
+  const XP = ID_XPOINTER;
+  const SEC = ID_SECTION;
+  const put = idPut;
+  const get = idGet;
+  const query = idQuery;
+  const rejected = (r) => r.status === 403 && r.json?.code === 2003;
+
+  // The probe has already answered. A server that does not implement the
+  // feature gets the family as SKIP rather than thirty pointless requests.
+  if (!features.get("identifiers").present) {
+    for (const [id, title] of ID_ASSERTIONS) {
+      assert({ id, section: SEC, level: "MAY", feature: "identifiers", title });
+    }
+    return;
+  }
+
+  // --- [K-ID-1] a request that names none is answered exactly as before -----
+  {
+    const plain = dg("plain");
+    const r = await put(plain, null, XP, 0.32);
+    const keys = isObject(r.json) ? Object.keys(r.json).sort() : [];
+    assert({
+      id: "K-ID-1", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-1"],
+      ok: r.status === 200 && keys.join(",") === "document,timestamp",
+      expected: '200 with exactly {"document":…,"timestamp":…}',
+      actual: r.error ?? `${r.status} ${fmt(r.json ?? r.text)}`,
+      note: isObject(r.json) && (r.json.match !== undefined || r.json.progress_match !== undefined)
+        ? "the server volunteered a matching field to a request that asked for none; a client that did not opt in must see the response it has always seen"
+        : undefined,
+    });
+  }
+
+  {
+    const doc = dg("bare");
+    const alias = dg("bare-s");
+    await put(doc, [["content", doc], ["structure", alias]], XP, 0.32);
+    const r = await get(doc, null);
+    const keys = isObject(r.json) ? Object.keys(r.json).sort().join(",") : "";
+    const viaAlias = await get(alias, null);
+    assert({
+      id: "K-ID-1b", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-1b"],
+      ok: r.status === 200
+        && r.json?.match === undefined && r.json?.progress_match === undefined
+        && r.json?.document === doc
+        && viaAlias.status === 200 && isObject(viaAlias.json) && viaAlias.json.percentage === undefined,
+      expected: "the pre-proposal body for the document itself, and {} for a digest that is only an alias",
+      actual: r.error ?? viaAlias.error ?? `GET ${doc}: ${r.status} keys=[${keys}]; GET ${alias}: ${viaAlias.status} ${fmt(viaAlias.json ?? viaAlias.text)}`,
+      note: viaAlias.json?.percentage !== undefined
+        ? "a read that named no identifiers followed an alias. Aliases exist only for requests that opt in; following one silently changes what an existing client reads."
+        : undefined,
+    });
+  }
+
+  // --- the three-copy fixture ----------------------------------------------
+  // original and repack share structure and metadata; edition shares only
+  // metadata. The same shape the reference implementation's own spec uses.
+  const c1 = dg("c1"), c2 = dg("c2"), c3 = dg("c3");
+  const s1 = dg("s1"), s3 = dg("s3"), m = dg("m");
+  const original = [["content", c1], ["structure", s1], ["metadata", m]];
+  const repack = [["content", c2], ["structure", s1], ["metadata", m]];
+  const edition = [["content", c3], ["structure", s3], ["metadata", m]];
+
+  {
+    const r = await put(c1, original, XP, 0.32);
+    const keys = isObject(r.json) ? Object.keys(r.json).sort().join(",") : "";
+    assert({
+      id: "K-ID-2", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-2"],
+      ok: r.status === 200 && keys === "document,match,timestamp"
+        && r.json.document === c1 && typeof r.json.timestamp === "number",
+      expected: `200 with exactly {"document":"${c1}","match":…,"timestamp":…}`,
+      actual: r.error ?? `${r.status} ${fmt(r.json ?? r.text)}`,
+      note: keys.includes("progress_match")
+        ? "progress_match belongs to a read; a write has no writer to compare against"
+        : undefined,
+    });
+    assert({
+      id: "K-ID-3", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-3"],
+      ok: r.json?.match === "content",
+      expected: '"content" — the first identifier, under which the record was created',
+      actual: r.error ?? fmt(r.json?.match),
+    });
+  }
+
+  {
+    const r = await get(c1, original);
+    assert({
+      id: "K-ID-3b", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-3b"],
+      ok: r.status === 200 && r.json?.document === c1
+        && r.json?.match === "content" && r.json?.progress_match === "content"
+        && r.json?.progress === XP,
+      expected: `200 with document ${c1}, match "content", progress_match "content", progress round-tripped`,
+      actual: r.error ?? `${r.status} ${fmt(r.json ?? r.text)}`,
+    });
+  }
+
+  {
+    const r = await get(c2, repack);
+    assert({
+      id: "K-ID-4", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-4"],
+      ok: r.status === 200 && r.json?.document === c1 && r.json?.match === "structure"
+        && r.json?.progress === XP,
+      expected: `200 with document ${c1} (the canonical digest), match "structure", the position written for the other copy`,
+      actual: r.error ?? `${r.status} ${fmt(r.json ?? r.text)}`,
+      note: isObject(r.json) && r.json.percentage === undefined
+        ? "the renamed copy found nothing. Sharing a weaker identifier with a copy the account has already read is the whole point of the proposal."
+        : r.json?.document === c2
+          ? "the canonical digest was not echoed; a client cannot then address the record directly on its next read"
+          : undefined,
+    });
+  }
+
+  {
+    // The same three identifiers, weakest first. A different one must win.
+    const weakest = await get(m, [["metadata", m], ["structure", s1], ["content", c1]]);
+    const strongest = await get(c1, original);
+    assert({
+      id: "K-ID-5", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-5"],
+      ok: weakest.json?.match === "metadata" && strongest.json?.match === "content"
+        && weakest.json?.document === c1,
+      expected: 'match "metadata" when metadata is offered first, "content" when content is',
+      actual: weakest.error ?? strongest.error
+        ?? `metadata-first: ${fmt(weakest.json?.match)} (document ${fmt(weakest.json?.document)}); content-first: ${fmt(strongest.json?.match)}`,
+      note: "the list is a preference order, not a set; a server that resolves in its own order gives two clients different answers for the same book",
+    });
+  }
+
+  {
+    // A third edition shares only metadata, and writes the position. The
+    // reader still matches on its own content digest, so how the record was
+    // found and who wrote the progress string are different answers.
+    await put(c3, edition, "/body/DocFragment[3]/body/p[9]", 0.5);
+    const r = await get(c1, original);
+    assert({
+      id: "K-ID-6", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-6"],
+      ok: r.json?.match === "content" && r.json?.progress_match === "metadata",
+      expected: 'match "content" (the record is the reader\'s own digest), progress_match "metadata" (all the writer shared)',
+      actual: r.error ?? `match ${fmt(r.json?.match)}, progress_match ${fmt(r.json?.progress_match)}`,
+      note: r.json?.progress_match === r.json?.match
+        ? "progress_match tracked match. They answer different questions: a reader can match a record on its own content digest and still be reading a different edition from the one that wrote the position, in which case the xpointer does not apply."
+        : undefined,
+    });
+  }
+
+  {
+    // d2 takes the position over through the structure digest, leaving a
+    // writer whose identifiers the metadata-only reader shares nothing with.
+    const d1 = dg("d1"), d2 = dg("d2"), ds = dg("ds"), dm = dg("dm");
+    await put(d1, [["content", d1], ["structure", ds], ["metadata", dm]], XP, 0.2);
+    await put(d2, [["content", d2], ["structure", ds]], "/body/p[4]", 0.3);
+    const r = await get(dm, [["metadata", dm]]);
+    assert({
+      id: "K-ID-6b", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-6b"],
+      ok: r.json?.document === d1 && r.json?.match === "metadata" && r.json?.progress_match === "none",
+      expected: 'match "metadata", progress_match "none"',
+      actual: r.error ?? `document ${fmt(r.json?.document)}, match ${fmt(r.json?.match)}, progress_match ${fmt(r.json?.progress_match)}`,
+      note: "the reader has to be able to tell 'found your book, but a copy you know nothing about wrote this position' from 'this position is yours'",
+    });
+  }
+
+  {
+    const e1 = dg("e1"), es = dg("es");
+    await put(e1, [["content", e1], ["structure", es]], XP, 0.2);
+    await put(e1, null, "/body/p[7]", 0.4);
+    const r = await get(e1, [["content", e1], ["structure", es]]);
+    assert({
+      id: "K-ID-6c", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-6c"],
+      ok: r.json?.progress === "/body/p[7]" && r.json?.match === "content"
+        && r.json?.progress_match === "content",
+      expected: 'the later position, match "content", progress_match "content"',
+      actual: r.error ?? `progress ${fmt(r.json?.progress)}, match ${fmt(r.json?.match)}, progress_match ${fmt(r.json?.progress_match)}`,
+      note: "identifiers left on a record by an earlier client must stop being attributed once a client that named none overwrites the progress string, or the reader is told an xpointer is safe on the strength of a claim nobody made",
+    });
+  }
+
+  {
+    const f1 = dg("f1"), f2 = dg("f2"), fs = dg("fs");
+    await put(f1, [["content", f1], ["structure", fs]], XP, 0.2);
+    // f2 is known separately first, so it keeps its own record.
+    await put(f2, [["content", f2]], "/body/p[2]", 0.1);
+    await put(f2, [["content", f2], ["structure", fs]], "/body/p[3]", 0.5);
+    const own = await get(f2, [["content", f2]]);
+    const other = await get(f1, [["content", f1]]);
+    assert({
+      id: "K-ID-7", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-7"],
+      ok: own.json?.document === f2 && own.json?.progress === "/body/p[3]"
+        && other.json?.document === f1 && other.json?.progress === XP,
+      expected: `${f2} keeps its own record at /body/p[3], and ${f1} is untouched`,
+      actual: own.error ?? other.error
+        ?? `own: document ${fmt(own.json?.document)} progress ${fmt(own.json?.progress)}; other: document ${fmt(other.json?.document)} progress ${fmt(other.json?.progress)}`,
+      note: other.json?.progress !== XP
+        ? "a weak identifier moved one book's position onto another book's record. An alias must lose a race against a digest that is a document in its own right, not win it."
+        : undefined,
+    });
+  }
+
+  {
+    // Two unrelated books a library tagged alike: they share only the weakest
+    // identifier the client offers.
+    const shared = dg("shared");
+    const b1 = dg("b1"), b1s = dg("b1s");
+    const b2 = dg("b2"), b2s = dg("b2s");
+    await put(b1, [["content", b1], ["structure", b1s], ["weak", shared]], XP, 0.8);
+    const merged = await put(b2, [["content", b2], ["structure", b2s], ["weak", shared]], "/body/p[1]", 0.01);
+
+    // The tagging is corrected, so nothing is shared any more. The second book
+    // gets its own record back only if its content digest was never registered.
+    const corrected = [["content", b2], ["structure", b2s], ["weak", dg("shared2")]];
+    const after = await put(b2, corrected, "/body/p[4]", 0.05);
+    const read = await get(b2, corrected);
+    assert({
+      id: "K-ID-12b", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-12b"],
+      ok: merged.json?.match === "weak" && merged.json?.document === b1
+        && after.status === 200 && after.json?.document === b2 && after.json?.match === "content"
+        && read.json?.percentage === 0.05,
+      expected: `the weak match resolves to ${b1}; once it no longer matches, ${b2} is its own record again`,
+      actual: merged.error ?? after.error ?? read.error
+        ?? `weak match: ${fmt(merged.json)}; after correcting: ${fmt(after.json)}; read: ${fmt(read.json?.percentage)}`,
+      note: after.json?.document === b1
+        ? "the caller's content digest was registered as an alias to a record found on its weakest identifier, so a wrong match is permanent: correcting what caused it does not free the copy. An alias created here is never repointed and nothing unlinks one."
+        : undefined,
+    });
+  }
+
+  {
+    // A weak entry may resolve a read, but it must not let a write claim a
+    // record that already exists.
+    const k1 = dg("wk1"), k1s = dg("wk1s"), shared = dg("wkm");
+    const k2 = dg("wk2"), k2s = dg("wk2s");
+    const weak = (v) => ({ type: "metadata", value: v, weak: true });
+    const listFor = (c, st) => [["content", c], ["structure", st]];
+
+    const mk = (document, c, st, progress, pct) =>
+      call("PUT", "/syncs/progress", {
+        body: {
+          document,
+          identifiers: [...listFor(c, st).map(([type, value]) => ({ type, value })), weak(shared)],
+          progress, percentage: pct, device: "kosync-conformance", device_id: "conformance-device-1",
+        },
+      });
+
+    const first = await mk(k1, k1, k1s, XP, 0.8);
+    assert({
+      id: "K-ID-16", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-16"],
+      ok: first.status === 200 && first.json?.document === k1 && first.json?.match === "content",
+      expected: `200 creating ${k1}, match "content"`,
+      actual: first.error ?? `${first.status} ${fmt(first.json ?? first.text)}`,
+      note: rejected(first)
+        ? "a `weak` flag on an identifier was rejected; it is an optional field on the entry, not a new type"
+        : undefined,
+    });
+
+    const second = await mk(k2, k2, k2s, "/body/p[1]", 0.01);
+    const original = await get(k1, listFor(k1, k1s));
+    assert({
+      id: "K-ID-17", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-17"],
+      ok: second.status === 200 && second.json?.document === k2
+        && original.json?.progress === XP && original.json?.percentage === 0.8,
+      expected: `${k2} written under its own digest, and ${k1} left at ${XP}`,
+      actual: second.error ?? original.error
+        ?? `push answered ${fmt(second.json?.document)}; the first record now reads ${fmt(original.json?.progress)} at ${fmt(original.json?.percentage)}`,
+      note: second.json?.document === k1
+        ? "the second work adopted the first's record through an identifier the caller marked weak, and overwrote the position stored there. A weak identifier seeds a reader; it does not claim a record."
+        : undefined,
+    });
+
+    // K-ID-17 on its own cannot tell "did not adopt" from "never registered the
+    // weak value at all": a server that skipped weak aliases would create k2,
+    // leave k1 alone, and pass it vacuously. Weakness governs adoption, not
+    // registration, so a third copy sharing only the weak value must still be
+    // seeded from the first record.
+    const k3 = dg("wk3");
+    const seeded = await get(k3, [["content", k3], ["metadata", shared]]);
+    assert({
+      id: "K-ID-17b", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-17b"],
+      ok: seeded.status === 200 && seeded.json?.document === k1
+        && seeded.json?.progress === XP && seeded.json?.progress_match === "metadata",
+      expected: `200 resolving to ${k1} through the weak value, progress_match "metadata"`,
+      actual: seeded.error ?? `${seeded.status} ${fmt(seeded.json ?? seeded.text)}`,
+      note: isObject(seeded.json) && seeded.json.percentage === undefined
+        ? "the weak identifier resolved nothing, so it was never registered as an alias. Weakness governs whether a write claims a record, not whether the value is indexed — without the alias there is nothing to seed a later copy from, which is the whole reason the type exists."
+        : undefined,
+    });
+  }
+
+  // --- validation -----------------------------------------------------------
+  {
+    const g1 = dg("g1"), gs = dg("gs");
+    const write = await put(g1, [["structure", gs], ["metadata", dg("gm")]], XP, 0.2);
+    const read = await get(g1, [["structure", gs]]);
+    assert({
+      id: "K-ID-8", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-8"],
+      ok: rejected(write) && rejected(read),
+      expected: "403 with {code:2003} on both the push and the read",
+      actual: write.error ?? read.error
+        ?? `PUT ${write.status} ${fmt(write.json)}, GET ${read.status} ${fmt(read.json)}`,
+      note: write.status === 200
+        ? "a list that names the document nowhere leaves the record unreachable by a client that sends no identifiers, which is every client today"
+        : undefined,
+    });
+  }
+
+  {
+    // The shape a filename-matching KOReader sends: the digest it is addressed
+    // by is the weakest thing it knows.
+    const w1 = dg("w1"), wc = dg("wc"), ws = dg("ws");
+    const write = await put(w1, [["content", wc], ["structure", ws], ["filename", w1]], XP, 0.2);
+    const plain = await get(w1, null);
+    const matched = await get(w1, [["content", wc], ["structure", ws], ["filename", w1]]);
+    assert({
+      id: "K-ID-8b", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-8b"],
+      ok: write.status === 200 && write.json?.document === w1 && write.json?.match === "filename"
+        && plain.status === 200 && plain.json?.percentage !== undefined
+        && matched.json?.match === "content",
+      expected: `200 creating ${w1}, match "filename"; a read naming none finds it; a read naming all matches on "content"`,
+      actual: write.error ?? plain.error ?? matched.error
+        ?? `PUT ${write.status} ${fmt(write.json)}; plain GET ${plain.status} ${fmt(plain.json)}; matched GET match=${fmt(matched.json?.match)}`,
+      note: rejected(write)
+        ? "the document was rejected for not being first. Position is preference, not identity: a client whose document digest is its weakest identifier has to be able to rank the others above it."
+        : plain.json?.percentage === undefined
+          ? "the record was not created under `document`, so a client that names no identifiers cannot reach it"
+          : undefined,
+    });
+  }
+
+  {
+    const h1 = dg("h1");
+    const many = [["content", h1]];
+    for (let i = 1; i <= 8; i++) many.push([`t${i}`, dg(`h-${i}`)]);
+    const write = await put(h1, many, XP, 0.2);
+    const read = await get(h1, many);
+    assert({
+      id: "K-ID-9", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-9"],
+      ok: rejected(write) && rejected(read),
+      expected: "403 with {code:2003} for a list of 9",
+      actual: write.error ?? read.error
+        ?? `PUT ${write.status} ${fmt(write.json)}, GET ${read.status} ${fmt(read.json)}`,
+      note: "each identifier is a redis lookup on the read path and an alias write on the write path; the cap is what keeps one request's cost bounded",
+    });
+    const eight = many.slice(0, 8);
+    const ok8 = await put(h1, eight, XP, 0.2);
+    assert({
+      id: "K-ID-9d", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-9d"],
+      ok: ok8.status === 200,
+      expected: "200 — the cap is 8, inclusive",
+      actual: ok8.error ?? `${ok8.status} ${fmt(ok8.json ?? ok8.text)}`,
+    });
+  }
+
+  {
+    const j1 = dg("j1");
+    const read = await get(j1, j1);                       // no type, no colon
+    const empty = await get(j1, "");                      // ids present, empty
+    assert({
+      id: "K-ID-9b", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-9b"],
+      ok: rejected(read) && (rejected(empty) || empty.status === 403),
+      expected: "403 with {code:2003}",
+      actual: read.error ?? `bare value: ${read.status} ${fmt(read.json)}; empty: ${empty.status} ${fmt(empty.json)}`,
+      note: "an unparseable list must not degrade into 'no identifiers named', which would silently answer a matching request with an unmatched body",
+    });
+  }
+
+  {
+    const k1 = dg("k1");
+    const write = await put(k1, [["content", k1], ["content", dg("k2")]], XP, 0.2);
+    const read = await get(k1, [["content", k1], ["content", dg("k2")]]);
+    assert({
+      id: "K-ID-9c", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-9c"],
+      ok: rejected(write) && rejected(read),
+      expected: "403 with {code:2003}",
+      actual: write.error ?? read.error
+        ?? `PUT ${write.status} ${fmt(write.json)}, GET ${read.status} ${fmt(read.json)}`,
+      note: "two values for one type is a client bug; resolving it in list order would make the answer depend on which the client happened to put first",
+    });
+  }
+
+  // --- isolation ------------------------------------------------------------
+  if (USER2 && KEY2) {
+    const r = await call("GET", `/syncs/progress/${c2}?ids=${query(repack)}`, {
+      auth: false,
+      headers: { "x-auth-user": USER2, "x-auth-key": String(KEY2).toLowerCase() },
+    });
+    assert({
+      id: "K-ID-10", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-10"],
+      ok: r.status === 200 && isObject(r.json) && r.json.percentage === undefined,
+      expected: "200 with no percentage — an alias is a per-account record, like the position it points at",
+      actual: r.error ?? `${r.status} ${fmt(r.json ?? r.text)}`,
+      note: r.json?.percentage !== undefined
+        ? "the second account resolved the first account's alias. Identifiers are derived from file contents, so every account that owns the same book collides."
+        : undefined,
+    });
+  } else {
+    assert({
+      id: "K-ID-10", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-10"],
+      skip: true,
+      note: "pass --second-user and --second-password (or --second-key) to check it",
+    });
+  }
+
+  {
+    const unseen = dg(`unseen-${Date.now()}`);
+    const r = await get(unseen, [["content", unseen], ["structure", dg("unseen-s")]]);
+    assert({
+      id: "K-ID-11", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-11"],
+      ok: r.status === 200 && isObject(r.json) && r.json.percentage === undefined
+        && r.json.match === undefined && r.json.progress_match === undefined,
+      expected: "200 with {} — no percentage, and no matching fields to report",
+      actual: r.error ?? `${r.status} ${fmt(r.json ?? r.text)}`,
+      note: r.status !== 200
+        ? "naming identifiers must not change [K-GET-3]: an unread book is still 200 with an empty body, not 404"
+        : undefined,
+    });
+  }
 }
 
 // ------------------------------------------------------------------- report
