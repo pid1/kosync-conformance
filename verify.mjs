@@ -1062,7 +1062,8 @@ const ID_ASSERTIONS = [
   ["K-ID-6b", "progress_match is none when the reader shares nothing with the writer"],
   ["K-ID-6c", "a progress string written without identifiers is attributed to its own digest"],
   ["K-ID-7", "an alias never shadows a document that exists in its own right"],
-  ["K-ID-8", "an identifier list whose first entry is not the document is rejected"],
+  ["K-ID-8", "an identifier list that does not name the document is rejected"],
+  ["K-ID-8b", "the document need not be first, and the record is created under it"],
   ["K-ID-9", "more than 8 identifiers is rejected"],
   ["K-ID-9d", "exactly 8 identifiers is accepted"],
   ["K-ID-9b", "a malformed ids parameter is rejected"],
@@ -1283,7 +1284,7 @@ async function identifierSuite() {
   // --- validation -----------------------------------------------------------
   {
     const g1 = dg("g1"), gs = dg("gs");
-    const write = await put(g1, [["structure", gs], ["content", g1]], XP, 0.2);
+    const write = await put(g1, [["structure", gs], ["metadata", dg("gm")]], XP, 0.2);
     const read = await get(g1, [["structure", gs]]);
     assert({
       id: "K-ID-8", section: SEC, level: "MAY", feature: "identifiers",
@@ -1293,8 +1294,32 @@ async function identifierSuite() {
       actual: write.error ?? read.error
         ?? `PUT ${write.status} ${fmt(write.json)}, GET ${read.status} ${fmt(read.json)}`,
       note: write.status === 200
-        ? "`document` and the first identifier must be the same string, or `document` stops meaning 'the identifier I would send if you only took one' and an old client and a new one address different records"
+        ? "a list that names the document nowhere leaves the record unreachable by a client that sends no identifiers, which is every client today"
         : undefined,
+    });
+  }
+
+  {
+    // The shape a filename-matching KOReader sends: the digest it is addressed
+    // by is the weakest thing it knows.
+    const w1 = dg("w1"), wc = dg("wc"), ws = dg("ws");
+    const write = await put(w1, [["content", wc], ["structure", ws], ["filename", w1]], XP, 0.2);
+    const plain = await get(w1, null);
+    const matched = await get(w1, [["content", wc], ["structure", ws], ["filename", w1]]);
+    assert({
+      id: "K-ID-8b", section: SEC, level: "MAY", feature: "identifiers",
+      title: ID_TITLE["K-ID-8b"],
+      ok: write.status === 200 && write.json?.document === w1 && write.json?.match === "filename"
+        && plain.status === 200 && plain.json?.percentage !== undefined
+        && matched.json?.match === "content",
+      expected: `200 creating ${w1}, match "filename"; a read naming none finds it; a read naming all matches on "content"`,
+      actual: write.error ?? plain.error ?? matched.error
+        ?? `PUT ${write.status} ${fmt(write.json)}; plain GET ${plain.status} ${fmt(plain.json)}; matched GET match=${fmt(matched.json?.match)}`,
+      note: rejected(write)
+        ? "the document was rejected for not being first. Position is preference, not identity: a client whose document digest is its weakest identifier has to be able to rank the others above it."
+        : plain.json?.percentage === undefined
+          ? "the record was not created under `document`, so a client that names no identifiers cannot reach it"
+          : undefined,
     });
   }
 
