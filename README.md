@@ -71,10 +71,10 @@ each one's design calls for.
 | Implementation | Version | Passed | MUST failed | SHOULD failed | Verdict |
 |---|---|---:|---:|---:|---|
 | `koreader/koreader-sync-server` (reference) | `koreader/kosync:latest`, OpenResty 1.29.2.3, gin 0.2.0 | 49 | **0** | 2 | conformant |
-| `pid1/tsundoku` | branch `kosync-spec` | 41 | **0** | 5 | conformant |
+| `pid1/tsundoku` | branch `main` | 47 | **0** | 2 | conformant |
 
-tsundoku's run skips 3 assertions, because it closes kosync self-registration
-by design and the run declared `--registration-off`.
+tsundoku's run skips the two registration assertions, because it closes kosync
+self-registration by design and the run declared `--registration-off`.
 
 The reference server's two SHOULD failures are a genuine defect in it, not a
 disagreement about the protocol: `PUT` accepts any document id, while `GET`
@@ -82,11 +82,6 @@ routes on `[A-Za-z0-9_]+` only, so an id containing a hyphen or a dot is stored
 and can never be read back (SPEC.md §5.5, §14.3). It is recorded as a SHOULD
 precisely because the reference fails it — a requirement derived from the
 reference cannot be one the reference violates.
-
-tsundoku's five are all "more permissive or differently worded than the
-reference": no numeric `code` in error bodies, `403` instead of `402/2005` for
-registration-disabled, `400` instead of `403/2004` for a missing `document`,
-and it accepts a push that omits `progress`/`percentage`/`device`.
 
 Implementations not yet run against the verifier, but surveyed by source for
 SPEC.md §11: `crosspoint-reader/crosspoint-sync`, `Cmooon/kosync`,
