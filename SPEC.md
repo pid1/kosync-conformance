@@ -884,13 +884,30 @@ identically or the label means nothing. The recipe, exactly:
 2. Walk `<spine>` in document order. For each `<itemref>`, resolve its `idref`
    against `<manifest>` and take that item's `href` **exactly as written** in
    the attribute: not percent-decoded, not resolved against the OPF directory,
-   not reduced to a basename. Strip a `#fragment` if one is present. Each is a
-   line, in spine order.
+   not reduced to a basename, and **not XML-entity-decoded** — an `href` written
+   `a&amp;b/ch2.xhtml` contributes those eighteen characters, not sixteen. Strip
+   a `#fragment` if one is present. Each is a line, in spine order.
 3. Join the lines with `\n`, with no trailing newline, and take the md5 of the
    UTF-8 bytes.
 
 A container with no spine, or one that is not an OPF-bearing archive, has no
 `structure` digest and the identifier is omitted rather than guessed.
+
+The rest of the recipe, because two implementations will otherwise each make a
+defensible choice and disagree:
+
+- **Element names are matched on the local name**, so `<opf:spine>` and
+  `<spine>` are the same element and `<identifier>` under a default Dublin Core
+  namespace counts as `<dc:identifier>`. Attribute values are not namespaced.
+- **An `<itemref>` whose `idref` resolves to no manifest item contributes no
+  line**, and does not invalidate the digest.
+- **`linear="no"` items are included.** They are spine entries, and the
+  renderer's `DocFragment` numbering counts them.
+- `<item>` is looked up within `<manifest>`, `<itemref>` within `<spine>`, and
+  `<dc:identifier>` within `<metadata>`.
+- **The OPF is the first `<rootfile>`** in `META-INF/container.xml`, whatever
+  its `media-type`. Its `full-path` is used as an archive member name as
+  written; if no member matches, there is no digest rather than a guessed one.
 
 `structure` deliberately covers **no file contents.** The tools that motivate
 this section rewrite them: CrossPoint's EPUB optimizer re-encodes images to
