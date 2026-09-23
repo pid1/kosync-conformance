@@ -870,10 +870,28 @@ without a recipe is not interoperable.
 | `structure` | md5 over the spine, as defined below | the edition, or the chapter list or its order, changes |
 | `filename` | md5 of the file name, as §8.5 derives it | the file is renamed |
 
+**[K-ID-15]** A client **offers only the types it can compute honestly.** The
+registry is not a set a client has to fill: a type whose recipe it cannot follow
+for the book in hand is omitted, not approximated. A client that can derive no
+identifier but `document` itself has nothing to say and sends no list at all,
+which is the request in §5.4 exactly as it was. Substituting a value that merely
+resembles a registered type is worse than omitting it — a digest over a title
+dressed up as `filename` is the `metadata` type this section removed, and
+`[K-ID-12]` will make one bad match permanent.
+
 **[K-ID-14]** A client **MUST NOT** treat a `progress_match` type it does not
 recognise as sufficient to follow a `progress` string. An unrecognised label
 carries no guarantee about the file the position was written against, so it is
 `percentage` that applies, not the stored position.
+
+The same applies to anything **derived** from that string, not only to following
+it. A client that resolves the stored position against the local book to compare
+it with the local one — for conflict detection, for a preview, for deciding
+whether to prompt — is resolving a position from a file it may not share, and the
+number it gets back looks authoritative. Gating only the jump leaves that number
+free to suppress a conflict prompt, at which point the position is overwritten
+with no one asked. Where the match is not one the client may follow, `percentage`
+is the only comparable quantity.
 
 `structure` is computed from the OPF, and two clients have to compute it
 identically or the label means nothing. The recipe, exactly:
@@ -921,6 +939,13 @@ defensible choice and disagree:
 - A package that puts `<item>` outside `<manifest>` is malformed, and resolves
   no spine entry, so it has **no** `structure` digest rather than one computed
   from whatever was found elsewhere.
+- **At least one spine line is required.** A digest of the identifier alone is
+  not a `structure` digest, so a package whose `<itemref>`s all dangle has none,
+  the same as one with no `<spine>` at all.
+- Two `<item>` elements carrying the same `id`: the **first**, as for
+  `<dc:identifier>`.
+- **An `href` is not trimmed.** Step 1 trims the identifier and nothing else
+  does; leading or trailing space inside the attribute is part of the value.
 - **An `<itemref>` whose `idref` resolves to no manifest item contributes no
   line**, and does not invalidate the digest. So does one that resolves to an
   `<item>` carrying no `href`: no href, no line, rather than an empty one.
@@ -2222,6 +2247,7 @@ reach `MUST` and be charged to every server.
 | `[K-SYNC-1]` … `[K-SYNC-6]` conflict resolution | Entirely client-side; the server never compares anything. The verifier asserts the server-side preconditions instead: `timestamp` present (`[K-FLD-13]`), in seconds (`[K-FLD-14]`), server-generated (`[K-PUT-4]`), and last-write-wins (`[K-PUT-5]`). |
 | `[K-ID-12]` an alias is created, never repointed | Not observable over HTTP: the alias table is private, and every wire consequence of it is already asserted — resolution is stable (`[K-ID-4]`), a document that exists in its own right is never shadowed (`[K-ID-7]`), and an identifier above the match is never registered (`[K-ID-12b]`). Proposed; see §5.8. |
 | `[K-ID-5b]` identifiers are ordered strongest first | Client-side, and not inferable from the wire: the server has no idea what any type means, so a weakest-first list is indistinguishable from a strongest-first one whose strongest identifier happens to be the one that matched. Checkable only by inspecting a client. Proposed; see §5.8. |
+| `[K-ID-15]` a client offers only the types it can compute honestly | Client-side, and invisible from the server: a list of two is indistinguishable from a client that could only manage two, and a value that merely resembles a registered type is a correct-looking string the server has no way to judge. Checkable only by inspecting a client. Proposed; see §5.8. |
 | `[K-ID-14]` a client must not follow a position on an unrecognised `progress_match` | Client-side. The server reports the type and acts on it in no way, so nothing over the wire distinguishes a client that honours this from one that ignores it. Checkable only by inspecting a client. Proposed; see §5.8. |
 | `[K-ID-13]` aliases are removed with the account | Same reason as `[K-DEL-1]`: probing `DELETE /users/me` would delete the account under test. Proposed; see §5.8. |
 | `[K-DOC-1]` … `[K-DOC-10]` document identity | Not a server behaviour: `document` is opaque to a server, and four of the eight surveyed servers never compute it (§11.1). Checked by `vectors/check.mjs` against the golden vectors of §8.6, not over HTTP. |
