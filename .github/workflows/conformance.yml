@@ -103,6 +103,10 @@ jobs:
               line(`| passed | ${s.PASS} |`);
               line(`| MUST failures | ${s.mustFailures} |`);
               line(`| SHOULD failures | ${s.shouldFailures} |`);
+              // MAY only when an optional feature was actually exercised.
+              if (r.assertions.some((a) => a.level === "MAY")) line(`| MAY failures | ${s.mayFailures} |`);
+              const present = Object.entries(r.features ?? {}).filter(([, f]) => f.present).map(([k]) => k);
+              if (present.length) line(`| optional features | ${present.join(", ")} |`);
               line(`| verdict | ${r.conformant ? "conformant" : "NOT conformant"} |`);
               const failed = r.assertions.filter((a) => a.status === "FAIL");
               if (failed.length) {

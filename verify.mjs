@@ -9,7 +9,8 @@
  *   node verify.mjs --base-url http://127.0.0.1:8080 --user alice --password s3cret
  *
  * Exit status: 0 if every MUST passed, 1 if any MUST failed, 2 on bad usage or
- * an unreachable server.
+ * an unreachable server. SHOULD and MAY failures are reported and do not
+ * change it.
  *
  * Every assertion cites a requirement id ([K-...]) and a section of the spec.
  * A failure prints what was expected and what actually came back, so the report
@@ -50,6 +51,11 @@ Profile (declare intentional deviations so they are reported as INFO, not FAIL)
   --registration-off   server has registration deliberately disabled
   --no-healthcheck     server has no GET /healthcheck
   --strict-accept      server is expected to REQUIRE the Accept header
+
+Optional features
+  Detected, not declared. Each is probed once before the suites run, and a
+  feature the server does not implement has its requirements skipped rather
+  than failed. There is no flag to set.
 
 Output
   --json FILE          write the machine-readable report to FILE
@@ -106,6 +112,52 @@ const KEY = (opts.key ?? md5(opts.password)).toLowerCase();
 const USER2 = opts.secondUser;
 const KEY2 = USER2 ? (opts.secondKey ?? (opts.secondPassword && md5(opts.secondPassword))) : undefined;
 
+// ----------------------------------------------------------------- features
+
+/**
+ * A MAY requirement belongs to an optional feature. Each feature registers a
+ * probe; the probe runs once, before the suites, and decides whether the
+ * server is held to the feature or skips it.
+ *
+ * Detection rather than declaration, because a server that has to be described
+ * to the verifier to be scored correctly will be described wrongly, and the
+ * resulting page of failures says nothing about the server.
+ *
+ *   key      short identifier, used in the report and in `--json`
+ *   title    what the feature is, in a noun phrase
+ *   section  the section of SPEC.md that defines it
+ *   probe    async, returns a boolean or { present, note }
+ */
+const features = new Map();
+
+function feature({ key, title, section, probe }) {
+  features.set(key, { key, title, section, probe, present: undefined, note: undefined });
+}
+
+async function probeFeatures() {
+  if (features.size === 0) return;
+  section("Optional features");
+  for (const f of features.values()) {
+    let outcome;
+    try {
+      outcome = await f.probe();
+    } catch (error) {
+      // A feature that cannot be detected cannot be required.
+      outcome = { present: false, note: `probe failed: ${error?.message ?? error}` };
+    }
+    if (isObject(outcome)) {
+      f.present = !!outcome.present;
+      f.note = outcome.note;
+    } else {
+      f.present = !!outcome;
+    }
+    if (opts.quiet) continue;
+    process.stdout.write(`${f.present ? "  yes " : "  no  "} [${f.key}] ${f.title}\n`);
+    process.stdout.write(`         ${SPEC} ${f.section}\n`);
+    if (f.note) process.stdout.write(`         ${f.note}\n`);
+  }
+}
+
 // ------------------------------------------------------------------ results
 
 const results = [];
@@ -116,9 +168,24 @@ let networkFailures = 0;
  *
  * level  MUST   a conformant server has to satisfy this; failure sets exit 1
  *        SHOULD recommended; failure is reported but does not fail the run
+ *        MAY    part of an optional feature. A server that does not implement
+ *               the feature skips the whole family; one that does is held to
+ *               it, and a failure is reported without failing the run
  *        INFO   observation only, never fails
+ *
+ * `feature` names a registered optional feature, and turns the assertion into
+ * a SKIP on a server the probe found does not implement it.
  */
-function assert({ id, section, level, title, ok, expected, actual, skip, note }) {
+function assert({ id, section, level, title, ok, expected, actual, skip, note, feature: featureKey }) {
+  if (featureKey !== undefined) {
+    const f = features.get(featureKey);
+    if (!f) throw new Error(`${id} names the unregistered feature "${featureKey}"`);
+    if (f.present === undefined) throw new Error(`${id} ran before "${featureKey}" was probed`);
+    if (!f.present && !skip) {
+      skip = true;
+      note = `not implemented here, and ${SPEC} ${f.section} makes ${f.title} optional`;
+    }
+  }
   const status = skip ? "SKIP" : ok ? "PASS" : level === "INFO" ? "INFO" : "FAIL";
   results.push({ id, section, level, title, status, expected, actual, note });
   if (opts.quiet && (status === "PASS" || status === "SKIP")) return;
@@ -231,6 +298,10 @@ async function main() {
       process.exit(2);
     }
   }
+
+  // --- Optional features, before the suites, so an assertion anywhere below
+  // already knows whether the server implements the one it belongs to.
+  await probeFeatures();
 
   // ===================================================== 3. transport
   section("§3  Transport and framing");
@@ -917,18 +988,26 @@ async function main() {
 function finish() {
   const counts = { PASS: 0, FAIL: 0, SKIP: 0, INFO: 0 };
   for (const r of results) counts[r.status]++;
-  const mustFailures = results.filter((r) => r.status === "FAIL" && r.level === "MUST");
-  const shouldFailures = results.filter((r) => r.status === "FAIL" && r.level === "SHOULD");
+  const failuresAt = (level) => results.filter((r) => r.status === "FAIL" && r.level === level);
+  const mustFailures = failuresAt("MUST");
+  const shouldFailures = failuresAt("SHOULD");
+  const mayFailures = failuresAt("MAY");
+
+  // MAY is named only when the run actually held the server to an optional
+  // feature, so a reported 0 means "implemented and correct" rather than
+  // "never looked".
+  const breakdown = [`${mustFailures.length} MUST`, `${shouldFailures.length} SHOULD`];
+  if (results.some((r) => r.level === "MAY")) breakdown.push(`${mayFailures.length} MAY`);
 
   process.stdout.write(`\n${"=".repeat(72)}\n`);
   process.stdout.write(
-    `${counts.PASS} passed, ${counts.FAIL} failed (${mustFailures.length} MUST, ${shouldFailures.length} SHOULD), ` +
+    `${counts.PASS} passed, ${counts.FAIL} failed (${breakdown.join(", ")}), ` +
       `${counts.SKIP} skipped, ${counts.INFO} informational\n`,
   );
 
   if (counts.FAIL > 0) {
     process.stdout.write(`\nFailures, most severe first:\n`);
-    for (const r of [...mustFailures, ...shouldFailures]) {
+    for (const r of [...mustFailures, ...shouldFailures, ...mayFailures]) {
       process.stdout.write(`  ${r.level.padEnd(6)} [${r.id}] ${r.title}\n`);
       process.stdout.write(`         expected ${fmt(r.expected)}\n`);
       process.stdout.write(`         got      ${fmt(r.actual)}\n`);
@@ -954,7 +1033,17 @@ function finish() {
       strictAccept: !!opts.strictAccept,
       isolationChecked: !!(USER2 && KEY2),
     },
-    summary: { ...counts, mustFailures: mustFailures.length, shouldFailures: shouldFailures.length, networkFailures },
+    features: Object.fromEntries(
+      [...features.values()].map((f) => [f.key, { present: !!f.present, section: f.section, note: f.note ?? null }]),
+    ),
+    summary: {
+      ...counts,
+      mustFailures: mustFailures.length,
+      shouldFailures: shouldFailures.length,
+      mayFailures: mayFailures.length,
+      networkFailures,
+    },
+    // An optional feature is optional: MUST alone decides conformance.
     conformant: mustFailures.length === 0 && networkFailures === 0,
     assertions: results,
   };
