@@ -24,7 +24,8 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          # sadr: cooldown exception CVE-2026-105481 CVE-2026-105482 CVE-2026-105483 CVE-2026-106069 CVE-2026-106073 CVE-2026-106074 CVE-2026-111497, lift when 24.22.1 clears the cooldown
+          node-version: 24.22.1
 
       # koreader/test-data holds leaves.epub and tall.pdf, whose partial-MD5
       # digests are pinned in KOReader's own spec/unit/util_spec.lua. Checking
@@ -55,7 +56,8 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          # sadr: cooldown exception CVE-2026-105481 CVE-2026-105482 CVE-2026-105483 CVE-2026-106069 CVE-2026-106073 CVE-2026-106074 CVE-2026-111497, lift when 24.22.1 clears the cooldown
+          node-version: 24.22.1
 
       - name: Wait for the reference server
         run: |
@@ -133,7 +135,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          # sadr: cooldown exception CVE-2026-105481 CVE-2026-105482 CVE-2026-105483 CVE-2026-106069 CVE-2026-106073 CVE-2026-106074 CVE-2026-111497, lift when 24.22.1 clears the cooldown
+          node-version: 24.22.1
       - run: node --check verify.mjs
       - run: node --check vectors/check.mjs
       - run: node --check coverage.mjs
