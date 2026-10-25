@@ -24,13 +24,18 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          # sadr: cooldown exception CVE-2026-105481 CVE-2026-105482 CVE-2026-105483 CVE-2026-106069 CVE-2026-106073 CVE-2026-106074 CVE-2026-111497, lift when 24.22.1 clears the cooldown
+          node-version: 24.22.1
 
       # koreader/test-data holds leaves.epub and tall.pdf, whose partial-MD5
       # digests are pinned in KOReader's own spec/unit/util_spec.lua. Checking
       # against those is what proves the first sample offset is 0 and not 256.
       - name: Fetch KOReader test fixtures
-        run: git clone --depth 1 https://github.com/koreader/test-data.git koreader-test-data
+        # koreader/test-data has no release tags. c3b5d06 is master on 2024-12-16.
+        run: |
+          git init -q koreader-test-data
+          git -C koreader-test-data fetch -q --depth 1 https://github.com/koreader/test-data.git c3b5d06e1ae8ea088bd898b0e7f9da3753d0d86c
+          git -C koreader-test-data checkout -q FETCH_HEAD
 
       # --big writes a sparse file of 1 GiB + 1024 bytes to exercise the twelfth
       # sample. ext4 on the runner allocates only the written extents.
@@ -45,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       kosync:
-        image: koreader/kosync:latest
+        image: koreader/kosync:latest@sha256:bb3f13615365703315a43b9059f65e71e876440f867e23a42bf27f2fa18264e1
         ports:
           # 17200 is the plaintext listener. 7200 serves HTTPS with a
           # self-signed certificate that Node's fetch rejects.
@@ -55,7 +60,8 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          # sadr: cooldown exception CVE-2026-105481 CVE-2026-105482 CVE-2026-105483 CVE-2026-106069 CVE-2026-106073 CVE-2026-106074 CVE-2026-111497, lift when 24.22.1 clears the cooldown
+          node-version: 24.22.1
 
       - name: Wait for the reference server
         run: |
@@ -133,7 +139,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          # sadr: cooldown exception CVE-2026-105481 CVE-2026-105482 CVE-2026-105483 CVE-2026-106069 CVE-2026-106073 CVE-2026-106074 CVE-2026-111497, lift when 24.22.1 clears the cooldown
+          node-version: 24.22.1
       - run: node --check verify.mjs
       - run: node --check vectors/check.mjs
       - run: node --check coverage.mjs
