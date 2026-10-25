@@ -11,4 +11,4 @@
 - The reference check starts the server with `sh reference-server/run.sh start` (Docker or Podman), registers `ciuser2` as the `reference` job in `.github/workflows/conformance.yml` does, then runs `node verify.mjs --base-url http://127.0.0.1:8080 --user ciuser1 --password cipass1 --register --strict-accept --second-user ciuser2 --second-password secondpass`. It passes when it prints "RESULT: conformant" and exits 0. Stop the server with `sh reference-server/run.sh stop`.
 
 ### Toolchain
-- No package manager and no lockfile. The only tools are Node (CI pins `node-version` in `.github/workflows/conformance.yml`), the `koreader/kosync` image, and the koreader/test-data fixtures that CI fetches by commit.
+- No package manager and no lockfile. CI installs only Node (`actions/setup-node`), the `koreader/kosync` image (a service container, and the default image in `reference-server/run.sh`), and a clone of koreader/test-data.
