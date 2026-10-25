@@ -3,7 +3,7 @@
 # Uses podman if present, otherwise docker. See README.md in this directory.
 set -eu
 
-IMAGE="${KOSYNC_IMAGE:-docker.io/koreader/kosync:latest}"
+IMAGE="${KOSYNC_IMAGE:-docker.io/koreader/kosync:latest@sha256:bb3f13615365703315a43b9059f65e71e876440f867e23a42bf27f2fa18264e1}"
 NAME="${KOSYNC_NAME:-kosync-ref}"
 PORT="${KOSYNC_PORT:-8080}"
 
