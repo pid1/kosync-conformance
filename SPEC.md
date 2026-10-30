@@ -818,7 +818,7 @@ succeed (`syncs_controller.lua:64-72`). A retry with the now-stale key returns
 | | |
 |---|---|
 | Upstream PR | [`koreader/koreader-sync-server#55`](https://github.com/koreader/koreader-sync-server/pull/55) |
-| Wire shape described here | branch `multi-identifier-aliases` at `0c0f5ad4eedf31668a6ca7646ed8ae9a9c4ed853` (`pid1/koreader-sync-server`, 2026-09-22) |
+| Wire shape described here | branch `multi-identifier-aliases` at `32c1edbb64298e99f8a116b9516c5b9f842fc345` (`pid1/koreader-sync-server`, 2026-09-23) |
 | Built and run for this section | that branch under OpenResty 1.29.2.3 with Redis 8.10.2, `GIN_ENV=test`, on 2026-09-22 |
 
 Citations in this section are to that branch, not to the pinned reference
@@ -2514,7 +2514,7 @@ questioning the code's existence (`syncs_controller.lua:17`):
 | Is there any client that sends a `timestamp` on PUT? | Not among those surveyed. The reference server would ignore it. |
 | Is `202` reachable on any server? | Not among those surveyed. |
 | Is error code `100` reachable? | **No**, in practice — §3.3. Every HTTP client sends a default `Accept`, so the reference server answers `101`. |
-| Will `identifiers` (§5.8) be merged, and in this shape? | **Open.** `koreader/koreader-sync-server#55` is unmerged as of 2026-09-27. §5.8 is pinned to a branch commit for that reason. |
+| Will `identifiers` (§5.8) be merged, and in this shape? | **Open.** `koreader/koreader-sync-server#55` is unmerged as of 2026-10-30. §5.8 is pinned to a branch commit for that reason. |
 | What identifier **types** should a client send? | `content`, `structure`, `metadata` and `filename`, strongest first, with the recipes in the §5.8 registry. `metadata` is always weak (`[K-ID-17]`). The server treats `type` as an opaque label and never interprets it (`identifiers.lua:1-3`), so the set can grow without a server change — but `progress_match` makes the label a trust signal between clients, so a label without a recipe is not interoperable (`[K-ID-14]`). None of the four is computed by any released KOReader build. |
 | How should a client pick the `document` when it holds several identifiers? | The one it would send if the server took only one. §5.8 requires one entry to equal `document` and not that it be first (`[K-ID-8b]`), so a client addressed by its filename digest ranks that entry last. |
 | Does an alias ever expire? | **No, in the proposal.** Aliases are removed only with the account (`[K-ID-13]`). A long-lived account accumulates one alias per distinct identifier it has ever offered, and nothing in the branch bounds that. |
