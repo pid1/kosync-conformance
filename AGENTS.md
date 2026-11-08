@@ -13,3 +13,4 @@
 
 ### Toolchain
 - No package manager and no lockfile. CI installs only Node (`actions/setup-node`), the `koreader/kosync` image (a service container, and the default image in `reference-server/run.sh`), and a clone of koreader/test-data.
+- CI fetches koreader/test-data at commit c3b5d06e1ae8ea088bd898b0e7f9da3753d0d86c (master on 2024-12-16). The repo has no release tags, and SPEC.md cites that commit.
