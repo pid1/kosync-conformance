@@ -1711,7 +1711,7 @@ than `{"authorized":"OK"}` (`Controllers/SyncController.cs:77-80`).
 
 [`verify.mjs`](verify.mjs), in this repository, checks a running server against
 the requirement identifiers above. It has no runtime dependencies beyond
-Node 18+, takes a base URL and credentials, and reports pass/fail per
+Node 22+, takes a base URL and credentials, and reports pass/fail per
 requirement with the spec section cited.
 
 ```bash
