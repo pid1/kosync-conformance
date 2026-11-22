@@ -3,7 +3,7 @@
  * kosync conformance verifier.
  *
  * Points at any kosync server and reports, per requirement identifier, whether
- * it conforms to docs/kosync-protocol.md. Self-contained: Node 18+, no runtime
+ * it conforms to docs/kosync-protocol.md. Self-contained: Node 22+, no runtime
  * dependencies, no assumption about the server's language, storage or hosting.
  *
  *   node verify.mjs --base-url http://127.0.0.1:8080 --user alice --password s3cret
